@@ -116,8 +116,43 @@ class FilingParser:
         elif filing_type in ("10-Q", "10-K"):
             self._parse_periodic_report(content, filing)
         elif filing_type == "4":
-            # Form 4 has specialized parser
-            pass
+            # Form 4 has specialized parser for insider trading
+            from .form4_parser import Form4Parser
+            form4_parser = Form4Parser()
+            form4_data = form4_parser.parse(content, metadata)
+            if form4_data:
+                filing.metadata["form4_data"] = {
+                    "issuer_ticker": form4_data.issuer_ticker,
+                    "insider_name": form4_data.insider_name,
+                    "insider_title": form4_data.insider_title,
+                    "relationship": form4_data.relationship,
+                    "net_shares": form4_data.net_shares,
+                    "total_buy_value": form4_data.total_buy_value,
+                    "total_sell_value": form4_data.total_sell_value,
+                    "signal": form4_data.signal,
+                    "signal_strength": form4_data.signal_strength,
+                    "is_c_suite": form4_data.is_c_suite,
+                    "transactions": [
+                        {
+                            "type": t.transaction_type,
+                            "shares": t.shares,
+                            "price": t.price_per_share,
+                            "value": t.total_value,
+                        }
+                        for t in form4_data.transactions
+                    ],
+                }
+                # Generate headline from Form 4 data
+                if form4_data.signal == "BULLISH":
+                    filing.headline = f"Insider Buy: {form4_data.insider_name} ({form4_data.insider_title})"
+                elif form4_data.signal == "BEARISH":
+                    filing.headline = f"Insider Sell: {form4_data.insider_name} ({form4_data.insider_title})"
+                else:
+                    filing.headline = f"Form 4: {form4_data.insider_name} filing"
+                filing.summary = f"{form4_data.insider_name} ({', '.join(form4_data.relationship)}) reported {len(form4_data.transactions)} transaction(s). Net shares: {form4_data.net_shares:,.0f}"
+            else:
+                # Fall back to generic parsing if Form 4 parser fails
+                self._parse_generic(content, filing)
         else:
             self._parse_generic(content, filing)
 
@@ -237,8 +272,8 @@ class FilingParser:
                         "value": value,
                         "currency": "USD",
                     })
-            except ValueError:
-                pass
+            except ValueError as e:
+                logger.debug("Failed to parse monetary value", raw=match, error=str(e))
 
     def _extract_entities(self, content: str, filing: FilingData) -> None:
         """Extract mentioned company/entity names."""

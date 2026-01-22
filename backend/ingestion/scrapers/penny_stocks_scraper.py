@@ -138,8 +138,8 @@ class PennyStocksScraper(BaseScraper):
             if hasattr(entry, "published_parsed") and entry.published_parsed:
                 try:
                     published = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc).isoformat()
-                except (TypeError, ValueError):
-                    pass
+                except (TypeError, ValueError) as e:
+                    logger.debug("Failed to parse date, using current time", title=title[:50], error=str(e))
 
             return {
                 "headline": title,
@@ -236,8 +236,8 @@ class PennyStocksScraper(BaseScraper):
                     if parsed_date.tzinfo is None:
                         parsed_date = parsed_date.replace(tzinfo=timezone.utc)
                     date_str = parsed_date.isoformat()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to parse HTML date", date_text=date_text[:30] if date_text else "", error=str(e))
 
             # Find summary
             summary_elem = elem.select_one("p, .summary, .excerpt, .description")

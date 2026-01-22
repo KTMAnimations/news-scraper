@@ -2,7 +2,7 @@
 
 import asyncio
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator
 
 import httpx
@@ -110,7 +110,7 @@ class RedditMonitor:
             expires_in = data.get("expires_in", 3600)
             self._token_expires = datetime.now(timezone.utc).replace(
                 microsecond=0
-            ) + asyncio.timedelta(seconds=expires_in - 60)
+            ) + timedelta(seconds=expires_in - 60)
 
             logger.info("Reddit authentication successful")
             return True

@@ -59,8 +59,13 @@ def calculate_alpha_task(self, data: dict[str, Any]) -> dict[str, Any]:
                     event_time = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
                 elif isinstance(time_str, datetime):
                     event_time = time_str
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                logger.warning(
+                    "Failed to parse event time",
+                    time_str=time_str,
+                    error=str(e),
+                    ticker=data.get("ticker"),
+                )
 
         # Calculate alpha
         calculator = AlphaCalculator()
@@ -99,22 +104,118 @@ def calculate_alpha_task(self, data: dict[str, Any]) -> dict[str, Any]:
 
 
 @celery_app.task
-def recalculate_alpha(ticker: str) -> dict[str, Any]:
+def recalculate_alpha(ticker: str, hours: int = 168) -> dict[str, Any]:
     """Recalculate alpha scores for all recent events of a ticker.
 
     Args:
         ticker: Stock ticker symbol
+        hours: Number of hours to look back (default 168 = 7 days)
 
     Returns:
         Results summary
     """
-    # This would fetch recent events from database and recalculate
-    # Placeholder for when database is implemented
-    return {
-        "ticker": ticker,
-        "recalculated": 0,
-        "status": "not_implemented",
-    }
+    import asyncio
+    from datetime import timedelta
+
+    from backend.storage.timescale import get_db_session, EventQueries
+    from backend.processing.classification import EventClassifier, EventType
+    from backend.processing.sentiment import get_sentiment_service
+    from backend.processing.scoring import AlphaCalculator
+
+    async def _recalculate():
+        recalculated = 0
+        errors = 0
+
+        async for session in get_db_session():
+            try:
+                queries = EventQueries(session)
+
+                # Get recent events for ticker
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+                events = await queries.get_events(
+                    ticker=ticker.upper(),
+                    start_time=cutoff,
+                    limit=500,
+                )
+
+                calculator = AlphaCalculator()
+                classifier = EventClassifier()
+                sentiment_service = get_sentiment_service()
+
+                for event in events:
+                    try:
+                        # Re-classify event
+                        classification = classifier.classify(
+                            headline=event.headline or "",
+                            text=event.summary or "",
+                            source=event.source,
+                        )
+
+                        # Re-analyze sentiment if we have text
+                        sentiment = None
+                        if event.summary:
+                            sentiment = await sentiment_service.analyze(event.summary)
+
+                        # Recalculate alpha
+                        alpha = calculator.calculate(
+                            classification=classification,
+                            sentiment=sentiment,
+                            source=event.source,
+                            event_time=event.event_time,
+                            ticker=event.ticker,
+                        )
+
+                        # Update event record
+                        event.alpha_score = alpha.score
+                        event.direction = alpha.direction
+                        event.urgency_level = alpha.urgency_level
+
+                        recalculated += 1
+
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to recalculate event",
+                            event_id=str(event.id),
+                            error=str(e),
+                        )
+                        errors += 1
+
+                await session.commit()
+
+            except Exception as e:
+                logger.error("Recalculation failed", ticker=ticker, error=str(e))
+                raise
+
+            break  # Only need one session
+
+        return recalculated, errors
+
+    try:
+        recalculated, errors = asyncio.run(_recalculate())
+
+        logger.info(
+            "Alpha recalculation complete",
+            ticker=ticker,
+            recalculated=recalculated,
+            errors=errors,
+        )
+
+        return {
+            "ticker": ticker,
+            "recalculated": recalculated,
+            "errors": errors,
+            "status": "completed",
+        }
+
+    except Exception as e:
+        logger.error("Recalculation task failed", ticker=ticker, error=str(e))
+        return {
+            "ticker": ticker,
+            "recalculated": 0,
+            "errors": 1,
+            "status": "failed",
+            "error": str(e),
+        }
 
 
 @celery_app.task
@@ -140,8 +241,12 @@ def score_urgency_task(data: dict[str, Any]) -> dict[str, Any]:
     if time_str:
         try:
             event_time = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                "Failed to parse event time in urgency scorer",
+                time_str=time_str,
+                error=str(e),
+            )
 
     scorer = UrgencyScorer()
     urgency = scorer.score(

@@ -209,6 +209,9 @@ async def websocket_watchlist(websocket: WebSocket, token: str):
             algorithms=[settings.jwt_algorithm],
         )
         user_id = payload.get("sub")
+        if not user_id:
+            await websocket.close(code=4001)
+            return
     except JWTError:
         await websocket.close(code=4001)
         return
@@ -216,8 +219,35 @@ async def websocket_watchlist(websocket: WebSocket, token: str):
     connection_id = str(uuid.uuid4())
     await manager.connect(websocket, connection_id, user_id=user_id)
 
-    # Subscribe to user's watchlist tickers
-    # This would load from database
+    # Subscribe to user's watchlist tickers from database
+    try:
+        from backend.storage.timescale import get_db_session, WatchlistQueries
+
+        async for session in get_db_session():
+            queries = WatchlistQueries(session)
+            watchlist_items = await queries.get_user_watchlist(user_id)
+
+            for item in watchlist_items:
+                await manager.subscribe(connection_id, item.ticker)
+                logger.info(
+                    "Subscribed to watchlist ticker",
+                    connection_id=connection_id,
+                    ticker=item.ticker,
+                )
+
+            # Send confirmation with subscribed tickers
+            await manager.send_personal(connection_id, {
+                "type": "watchlist_loaded",
+                "tickers": [item.ticker for item in watchlist_items],
+            })
+            break  # Only need one session
+
+    except Exception as e:
+        logger.error("Failed to load watchlist", error=str(e))
+        await manager.send_personal(connection_id, {
+            "type": "error",
+            "message": "Failed to load watchlist subscriptions",
+        })
 
     try:
         while True:

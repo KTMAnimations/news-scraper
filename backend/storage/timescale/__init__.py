@@ -2,7 +2,7 @@
 
 from .connection import get_db_session, init_db
 from .models import Alert, Event, User, Watchlist
-from .queries import EventQueries
+from .queries import AlertQueries, EventQueries, UserQueries, WatchlistQueries
 
 __all__ = [
     "get_db_session",
@@ -12,4 +12,7 @@ __all__ = [
     "Watchlist",
     "Alert",
     "EventQueries",
+    "UserQueries",
+    "WatchlistQueries",
+    "AlertQueries",
 ]

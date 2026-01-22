@@ -1,6 +1,7 @@
 """Celery application configuration."""
 
 from celery import Celery
+from celery.schedules import crontab
 
 from backend.config import settings
 
@@ -84,6 +85,18 @@ celery_app.conf.update(
         "check-otc-tier-changes-every-hour": {
             "task": "backend.workers.tasks.scraping_tasks.check_otc_tiers",
             "schedule": 3600.0,
+        },
+        "send-daily-digest-morning": {
+            "task": "backend.workers.tasks.alerting_tasks.aggregate_daily_digest",
+            "schedule": crontab(hour=9, minute=0),  # 9 AM UTC daily
+        },
+        "cleanup-old-alerts-nightly": {
+            "task": "backend.workers.tasks.alerting_tasks.cleanup_old_alerts",
+            "schedule": crontab(hour=3, minute=0),  # 3 AM UTC daily
+        },
+        "refresh-ticker-knowledge-base-daily": {
+            "task": "backend.workers.tasks.nlp_tasks.refresh_knowledge_base",
+            "schedule": crontab(hour=6, minute=0),  # 6 AM UTC daily
         },
     },
 )

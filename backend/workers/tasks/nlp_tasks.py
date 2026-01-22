@@ -243,3 +243,35 @@ def link_tickers_task(data: dict[str, Any]) -> dict[str, Any]:
         return loop.run_until_complete(_link())
     finally:
         loop.close()
+
+
+@celery_app.task
+def refresh_knowledge_base() -> dict[str, Any]:
+    """Refresh the ticker knowledge base from SEC.
+
+    Returns:
+        Refresh result
+    """
+    import asyncio
+    from datetime import datetime, timezone
+
+    async def _refresh():
+        from backend.processing.ner.knowledge_base import TickerKnowledgeBase
+
+        kb = TickerKnowledgeBase()
+        await kb.load(force_refresh=True)
+
+        return len(kb.get_all_tickers())
+
+    loop = asyncio.new_event_loop()
+    try:
+        ticker_count = loop.run_until_complete(_refresh())
+    finally:
+        loop.close()
+
+    logger.info("Knowledge base refreshed", ticker_count=ticker_count)
+
+    return {
+        "refreshed_at": datetime.now(timezone.utc).isoformat(),
+        "ticker_count": ticker_count,
+    }

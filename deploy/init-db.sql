@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS events (
     sentiment_confidence FLOAT,
     alpha_score FLOAT,
     direction VARCHAR(10),
-    urgency VARCHAR(20),
+    urgency_level VARCHAR(20),
 
     -- Entities
     extracted_tickers TEXT[],
@@ -77,19 +77,20 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
 CREATE INDEX IF NOT EXISTS idx_users_stripe ON users (stripe_customer_id);
 
--- Watchlist table
-CREATE TABLE IF NOT EXISTS watchlist_items (
+-- Watchlist table (matches SQLAlchemy model name 'watchlists')
+CREATE TABLE IF NOT EXISTS watchlists (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     ticker VARCHAR(10) NOT NULL,
     added_at TIMESTAMPTZ DEFAULT NOW(),
     notes TEXT,
+    alert_enabled BOOLEAN DEFAULT TRUE,
 
     UNIQUE(user_id, ticker)
 );
 
-CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist_items (user_id);
-CREATE INDEX IF NOT EXISTS idx_watchlist_ticker ON watchlist_items (ticker);
+CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlists (user_id);
+CREATE INDEX IF NOT EXISTS idx_watchlist_ticker ON watchlists (ticker);
 
 -- Alerts table
 CREATE TABLE IF NOT EXISTS alerts (

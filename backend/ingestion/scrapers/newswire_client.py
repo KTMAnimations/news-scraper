@@ -169,8 +169,12 @@ class NewswireClient(BaseScraper):
                 try:
                     pub_dt = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
                     published = pub_dt.isoformat()
-                except (TypeError, ValueError):
-                    pass
+                except (TypeError, ValueError) as e:
+                    logger.debug(
+                        "Failed to parse published date, using current time",
+                        title=title[:50],
+                        error=str(e),
+                    )
 
             # Classify the release
             event_type, event_category = self._classify_release(title, clean_content)

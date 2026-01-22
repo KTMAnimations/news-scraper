@@ -86,8 +86,8 @@ class OTCDisclosureScraper:
                 data = response.json()
                 return self._parse_profile_api(data, symbol)
 
-        except httpx.HTTPStatusError:
-            pass
+        except httpx.HTTPStatusError as e:
+            logger.debug("OTC API returned error, falling back to HTML", symbol=symbol, status=e.response.status_code)
         except Exception as e:
             logger.warning("API profile fetch failed", symbol=symbol, error=str(e))
 

@@ -2,23 +2,40 @@
 
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import settings
 from backend.storage.timescale import init_db
 
+from .middleware import RateLimitMiddleware
 from .routes import alerts, auth, billing, events, search, tickers, watchlist
+from .websocket.streamer import EventStreamer, router as websocket_router
+
+logger = structlog.get_logger(__name__)
+
+# Global event streamer instance
+event_streamer = EventStreamer()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     # Startup
+    logger.info("Starting application...")
     await init_db()
+
+    # Start WebSocket event streamer
+    await event_streamer.start()
+    logger.info("Event streamer started")
+
     yield
+
     # Shutdown
-    pass
+    logger.info("Shutting down application...")
+    await event_streamer.stop()
+    logger.info("Event streamer stopped")
 
 
 # Create FastAPI app
@@ -28,6 +45,10 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Rate limiting middleware (add first so it runs early)
+if not settings.debug:
+    app.add_middleware(RateLimitMiddleware, default_limit=60, window_seconds=60)
 
 # CORS middleware
 app.add_middleware(
@@ -46,6 +67,9 @@ app.include_router(tickers.router, prefix="/api/v1/tickers", tags=["Tickers"])
 app.include_router(watchlist.router, prefix="/api/v1/watchlist", tags=["Watchlist"])
 app.include_router(alerts.router, prefix="/api/v1/alerts", tags=["Alerts"])
 app.include_router(billing.router, prefix="/api/v1/billing", tags=["Billing"])
+
+# WebSocket routes (no prefix - paths defined in router)
+app.include_router(websocket_router, tags=["WebSocket"])
 
 
 @app.get("/")

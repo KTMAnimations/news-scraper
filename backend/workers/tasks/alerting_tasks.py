@@ -1,5 +1,6 @@
 """Alerting tasks for notifications."""
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -8,6 +9,15 @@ import structlog
 from backend.workers.celery_app import celery_app
 
 logger = structlog.get_logger(__name__)
+
+
+def run_async(coro):
+    """Run async function in sync context."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 @celery_app.task
@@ -20,33 +30,55 @@ def check_alerts_task(data: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Data with alert check results
     """
-    # This would check against user alert rules in database
-    # Placeholder implementation
+    async def _check_alerts():
+        from backend.notifications import NotificationManager
+        from backend.storage.timescale.connection import get_db_context
 
-    ticker = data.get("ticker")
-    alpha_score = data.get("alpha_score", 0.0)
-    urgency_level = data.get("urgency_level", "low")
+        async with get_db_context() as session:
+            manager = NotificationManager(session)
 
-    alerts_triggered = []
+            # Check alert rules
+            triggered_alerts = await manager.check_alerts_for_event(data)
 
-    # Check for high-alpha events
-    if abs(alpha_score) > 0.7 and urgency_level in ("critical", "high"):
-        alerts_triggered.append({
-            "type": "high_alpha",
-            "ticker": ticker,
-            "alpha_score": alpha_score,
-            "reason": f"High alpha event detected for {ticker}",
-        })
+            # Dispatch notifications for triggered alerts
+            notifications_sent = 0
+            for alert_info in triggered_alerts:
+                dispatch_result = await manager.dispatch_alert(alert_info, data)
+                if dispatch_result.get("email_sent") or dispatch_result.get("push_sent"):
+                    notifications_sent += 1
 
-    # Would check user watchlists, custom rules, etc.
+            # Check watchlist matches for high-importance events
+            urgency = data.get("urgency_level", "low")
+            watchlist_matches = []
+            if urgency in ("critical", "high"):
+                watchlist_matches = await manager.check_watchlist_alerts(data)
+                for match in watchlist_matches:
+                    alert_info = {
+                        "alert_id": match.get("watchlist_id"),
+                        "user_id": match.get("user_id"),
+                        "user_email": match.get("user_email"),
+                        "user_name": match.get("user_name"),
+                        "delivery_method": "email",
+                    }
+                    dispatch_result = await manager.dispatch_alert(alert_info, data)
+                    if dispatch_result.get("email_sent"):
+                        notifications_sent += 1
 
-    data["alerts_triggered"] = alerts_triggered
+            return {
+                "alerts_triggered": len(triggered_alerts),
+                "watchlist_matches": len(watchlist_matches),
+                "notifications_sent": notifications_sent,
+            }
+
+    result = run_async(_check_alerts())
+
+    data["alerts_triggered"] = result.get("alerts_triggered", 0)
+    data["watchlist_matches"] = result.get("watchlist_matches", 0)
+    data["notifications_sent"] = result.get("notifications_sent", 0)
     data["alerts_checked_at"] = datetime.now(timezone.utc).isoformat()
 
-    if alerts_triggered:
-        # Dispatch alerts
-        for alert in alerts_triggered:
-            dispatch_alert.delay(alert, data)
+    # Always publish to WebSocket for real-time updates
+    publish_websocket_event.delay(data)
 
     return data
 
@@ -56,37 +88,35 @@ def dispatch_alert(alert: dict[str, Any], event_data: dict[str, Any]) -> dict[st
     """Dispatch an alert to users.
 
     Args:
-        alert: Alert rule that was triggered
+        alert: Alert info including user details
         event_data: Event data that triggered the alert
 
     Returns:
         Dispatch result
     """
+    async def _dispatch():
+        from backend.notifications import NotificationManager
+        from backend.storage.timescale.connection import get_db_context
+
+        async with get_db_context() as session:
+            manager = NotificationManager(session)
+            return await manager.dispatch_alert(alert, event_data)
+
+    result = run_async(_dispatch())
+
     logger.info(
-        "Dispatching alert",
-        alert_type=alert.get("type"),
-        ticker=alert.get("ticker"),
+        "Alert dispatched",
+        alert_id=alert.get("alert_id"),
+        email_sent=result.get("email_sent"),
+        push_sent=result.get("push_sent"),
     )
-
-    # This would:
-    # 1. Look up users subscribed to this alert
-    # 2. Send via configured channels (email, push, websocket)
-
-    result = {
-        "alert": alert,
-        "dispatched_to": [],
-        "dispatched_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-    # Publish to WebSocket for real-time updates
-    publish_websocket_event.delay(event_data)
 
     return result
 
 
 @celery_app.task
 def publish_websocket_event(data: dict[str, Any]) -> dict[str, Any]:
-    """Publish event to WebSocket subscribers.
+    """Publish event to WebSocket subscribers via Redis pub/sub.
 
     Args:
         data: Event data to publish
@@ -94,23 +124,26 @@ def publish_websocket_event(data: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Publish result
     """
-    import json
+    async def _publish():
+        from backend.notifications.notification_manager import NotificationManager
+        from backend.storage.timescale.connection import get_db_context
 
-    # This would publish to Redis pub/sub for WebSocket distribution
-    # Placeholder implementation
+        async with get_db_context() as session:
+            manager = NotificationManager(session)
+            published = await manager.publish_to_websocket(data)
+            return published
+
+    published = run_async(_publish())
 
     logger.debug(
-        "Publishing to WebSocket",
+        "WebSocket publish",
         ticker=data.get("ticker"),
         event_type=data.get("event_type"),
+        published=published,
     )
 
-    # Would use Redis pub/sub:
-    # redis_client.publish("events:all", json.dumps(data))
-    # redis_client.publish(f"events:ticker:{ticker}", json.dumps(data))
-
     return {
-        "published": True,
+        "published": published,
         "ticker": data.get("ticker"),
         "event_type": data.get("event_type"),
     }
@@ -128,23 +161,29 @@ def send_email_alert(
     Args:
         user_email: User email address
         subject: Email subject
-        body: Email body
+        body: Email body (HTML)
         event_data: Event data for context
 
     Returns:
         Send result
     """
-    logger.info(
-        "Sending email alert",
-        to=user_email,
+    from backend.notifications.email_service import email_service
+
+    sent = email_service.send_email(
+        to_email=user_email,
         subject=subject,
+        html_body=body,
     )
 
-    # This would use email service (SES, SendGrid, etc.)
-    # Placeholder implementation
+    logger.info(
+        "Email alert sent",
+        to=user_email,
+        subject=subject,
+        sent=sent,
+    )
 
     return {
-        "sent": True,
+        "sent": sent,
         "to": user_email,
         "subject": subject,
         "sent_at": datetime.now(timezone.utc).isoformat(),
@@ -187,41 +226,154 @@ def send_push_notification(
 
 
 @celery_app.task
-def aggregate_daily_digest(user_id: str) -> dict[str, Any]:
-    """Generate daily digest for a user.
-
-    Args:
-        user_id: User ID
+def aggregate_daily_digest() -> dict[str, Any]:
+    """Generate and send daily digests to all users with digest enabled.
 
     Returns:
         Digest generation result
     """
-    logger.info("Generating daily digest", user_id=user_id)
+    from datetime import timedelta
 
-    # This would:
-    # 1. Fetch user's watchlist
-    # 2. Get events from last 24 hours
-    # 3. Aggregate and summarize
-    # 4. Send digest email
+    async def _generate_digests():
+        from backend.storage.timescale import get_db_session, EventQueries, WatchlistQueries
+        from backend.storage.timescale.models import User
+        from backend.notifications.email_service import email_service
+        from sqlalchemy import select
+
+        digests_sent = 0
+        errors = 0
+
+        async for session in get_db_session():
+            try:
+                # Get all active users
+                result = await session.execute(
+                    select(User).where(User.is_active == True)
+                )
+                users = result.scalars().all()
+
+                event_queries = EventQueries(session)
+                watchlist_queries = WatchlistQueries(session)
+
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+
+                for user in users:
+                    try:
+                        # Get user's watchlist
+                        watchlist = await watchlist_queries.get_user_watchlist(user.id)
+                        tickers = [w.ticker for w in watchlist]
+
+                        if not tickers:
+                            continue
+
+                        # Get events for watchlist tickers from last 24 hours
+                        all_events = []
+                        for ticker in tickers:
+                            events = await event_queries.get_events(
+                                ticker=ticker,
+                                start_time=cutoff,
+                                limit=50,
+                            )
+                            all_events.extend(events)
+
+                        if not all_events:
+                            continue
+
+                        # Sort by alpha score
+                        all_events.sort(
+                            key=lambda e: e.alpha_score or 0,
+                            reverse=True,
+                        )
+
+                        # Send digest email
+                        sent = await email_service.send_daily_digest(
+                            to_email=user.email,
+                            user_name=user.full_name or user.email,
+                            events=all_events[:20],  # Top 20 events
+                        )
+
+                        if sent:
+                            digests_sent += 1
+
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to generate digest for user",
+                            user_id=str(user.id),
+                            error=str(e),
+                        )
+                        errors += 1
+
+            except Exception as e:
+                logger.error("Daily digest generation failed", error=str(e))
+                raise
+
+            break
+
+        return digests_sent, errors
+
+    digests_sent, errors = run_async(_generate_digests())
+
+    logger.info(
+        "Daily digest generation complete",
+        digests_sent=digests_sent,
+        errors=errors,
+    )
 
     return {
-        "user_id": user_id,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "events_count": 0,
+        "digests_sent": digests_sent,
+        "errors": errors,
     }
 
 
 @celery_app.task
-def cleanup_old_alerts() -> dict[str, Any]:
-    """Clean up old alert records.
+def cleanup_old_alerts(days: int = 90) -> dict[str, Any]:
+    """Clean up old events and compress TimescaleDB chunks.
+
+    Args:
+        days: Delete events older than this many days
 
     Returns:
         Cleanup result
     """
-    # This would delete old alert records from database
-    # Placeholder implementation
+    from datetime import timedelta
+
+    async def _cleanup():
+        from backend.storage.timescale import get_db_session
+        from backend.storage.timescale.models import Event
+        from sqlalchemy import delete
+
+        deleted_count = 0
+
+        async for session in get_db_session():
+            try:
+                cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+                # Delete old events (TimescaleDB retention policy handles this too)
+                result = await session.execute(
+                    delete(Event).where(Event.event_time < cutoff)
+                )
+                deleted_count = result.rowcount
+
+                await session.commit()
+
+                logger.info(
+                    "Cleaned up old events",
+                    deleted=deleted_count,
+                    cutoff=cutoff.isoformat(),
+                )
+
+            except Exception as e:
+                logger.error("Cleanup failed", error=str(e))
+                raise
+
+            break
+
+        return deleted_count
+
+    deleted_count = run_async(_cleanup())
 
     return {
         "cleaned_at": datetime.now(timezone.utc).isoformat(),
-        "records_deleted": 0,
+        "records_deleted": deleted_count,
+        "days_threshold": days,
     }

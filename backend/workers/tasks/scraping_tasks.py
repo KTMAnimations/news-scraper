@@ -170,80 +170,104 @@ def check_otc_tiers(self) -> dict[str, Any]:
 
 @celery_app.task
 def process_filing(filing: dict[str, Any]) -> dict[str, Any]:
-    """Process a single SEC filing.
+    """Process a single SEC filing through NLP pipeline.
 
     Args:
         filing: Filing data dictionary
 
     Returns:
-        Processed event
+        Task chain info
     """
     from backend.workers.tasks.nlp_tasks import extract_entities_task, analyze_sentiment_task
     from backend.workers.tasks.scoring_tasks import calculate_alpha_task
+    from backend.workers.tasks.alerting_tasks import check_alerts_task
 
-    # Chain: extract entities -> analyze sentiment -> calculate alpha
+    # Chain: extract entities -> analyze sentiment -> calculate alpha -> check alerts
     chain = (
         extract_entities_task.s(filing) |
         analyze_sentiment_task.s() |
-        calculate_alpha_task.s()
+        calculate_alpha_task.s() |
+        check_alerts_task.s()
     )
 
-    return chain.apply_async()
+    result = chain.apply_async()
+    return {
+        "task_id": result.id,
+        "status": "processing",
+        "source": filing.get("source", "sec_edgar"),
+        "ticker": filing.get("ticker"),
+    }
 
 
 @celery_app.task
 def process_article(article: dict[str, Any]) -> dict[str, Any]:
-    """Process a single news article.
+    """Process a single news article through NLP pipeline.
 
     Args:
         article: Article data dictionary
 
     Returns:
-        Processed event
+        Task chain info
     """
     from backend.workers.tasks.nlp_tasks import extract_entities_task, analyze_sentiment_task
     from backend.workers.tasks.scoring_tasks import calculate_alpha_task
+    from backend.workers.tasks.alerting_tasks import check_alerts_task
 
     chain = (
         extract_entities_task.s(article) |
         analyze_sentiment_task.s() |
-        calculate_alpha_task.s()
+        calculate_alpha_task.s() |
+        check_alerts_task.s()
     )
 
-    return chain.apply_async()
+    result = chain.apply_async()
+    return {
+        "task_id": result.id,
+        "status": "processing",
+        "source": article.get("source", "news"),
+        "ticker": article.get("ticker"),
+    }
 
 
 @celery_app.task
 def process_social_mention(mention: dict[str, Any]) -> dict[str, Any]:
-    """Process a single social media mention.
+    """Process a single social media mention through NLP pipeline.
 
     Args:
         mention: Mention data dictionary
 
     Returns:
-        Processed event
+        Task chain info
     """
     from backend.workers.tasks.nlp_tasks import analyze_sentiment_task
     from backend.workers.tasks.scoring_tasks import calculate_alpha_task
+    from backend.workers.tasks.alerting_tasks import check_alerts_task
 
     # Social mentions may already have ticker extracted
     chain = (
         analyze_sentiment_task.s(mention) |
-        calculate_alpha_task.s()
+        calculate_alpha_task.s() |
+        check_alerts_task.s()
     )
 
-    return chain.apply_async()
+    result = chain.apply_async()
+    return {
+        "task_id": result.id,
+        "status": "processing",
+        "source": mention.get("source", "social"),
+        "ticker": mention.get("ticker"),
+    }
 
 
 @celery_app.task
 def process_event(event: dict[str, Any]) -> dict[str, Any]:
-    """Process a generic event.
+    """Process a generic event (already classified, needs scoring).
 
     Args:
         event: Event data dictionary
 
     Returns:
-        Processed event
+        Task chain info
     """
     # Events already have ticker and classification
     from backend.workers.tasks.scoring_tasks import calculate_alpha_task
@@ -254,7 +278,13 @@ def process_event(event: dict[str, Any]) -> dict[str, Any]:
         check_alerts_task.s()
     )
 
-    return chain.apply_async()
+    result = chain.apply_async()
+    return {
+        "task_id": result.id,
+        "status": "processing",
+        "source": event.get("source", "event"),
+        "ticker": event.get("ticker"),
+    }
 
 
 @celery_app.task

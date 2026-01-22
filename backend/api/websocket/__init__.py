@@ -1,6 +1,6 @@
 """WebSocket module."""
 
-from .manager import ConnectionManager
-from .streamer import EventStreamer
+from .manager import ConnectionManager, manager
+from .streamer import EventStreamer, router
 
-__all__ = ["ConnectionManager", "EventStreamer"]
+__all__ = ["ConnectionManager", "EventStreamer", "manager", "router"]

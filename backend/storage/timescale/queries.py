@@ -369,3 +369,211 @@ class WatchlistQueries:
             return True
 
         return False
+
+
+class AlertQueries:
+    """Query methods for alerts."""
+
+    def __init__(self, session: AsyncSession):
+        """Initialize with database session."""
+        self.session = session
+
+    async def get_user_alerts(self, user_id: UUID) -> list[Alert]:
+        """Get all alerts for a user.
+
+        Args:
+            user_id: User UUID
+
+        Returns:
+            List of alerts
+        """
+        result = await self.session.execute(
+            select(Alert).where(Alert.user_id == user_id).order_by(Alert.created_at)
+        )
+        return list(result.scalars().all())
+
+    async def get_active_alerts(self, user_id: UUID) -> list[Alert]:
+        """Get active alerts for a user.
+
+        Args:
+            user_id: User UUID
+
+        Returns:
+            List of active alerts
+        """
+        result = await self.session.execute(
+            select(Alert).where(
+                and_(
+                    Alert.user_id == user_id,
+                    Alert.is_active == True,
+                )
+            )
+        )
+        return list(result.scalars().all())
+
+    async def get_all_active_alerts(self) -> list[Alert]:
+        """Get all active alerts across all users.
+
+        Returns:
+            List of all active alerts
+        """
+        result = await self.session.execute(
+            select(Alert).where(Alert.is_active == True)
+        )
+        return list(result.scalars().all())
+
+    async def get_alert_by_id(self, alert_id: UUID) -> Alert | None:
+        """Get alert by ID.
+
+        Args:
+            alert_id: Alert UUID
+
+        Returns:
+            Alert or None
+        """
+        result = await self.session.execute(
+            select(Alert).where(Alert.id == alert_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def create_alert(self, alert_data: dict[str, Any]) -> Alert:
+        """Create a new alert.
+
+        Args:
+            alert_data: Alert data dictionary
+
+        Returns:
+            Created Alert
+        """
+        alert = Alert(**alert_data)
+        self.session.add(alert)
+        await self.session.flush()
+        return alert
+
+    async def update_alert(
+        self,
+        alert_id: UUID,
+        update_data: dict[str, Any],
+    ) -> Alert | None:
+        """Update an alert.
+
+        Args:
+            alert_id: Alert UUID
+            update_data: Fields to update
+
+        Returns:
+            Updated Alert or None
+        """
+        result = await self.session.execute(
+            select(Alert).where(Alert.id == alert_id)
+        )
+        alert = result.scalar_one_or_none()
+
+        if not alert:
+            return None
+
+        for key, value in update_data.items():
+            if hasattr(alert, key):
+                setattr(alert, key, value)
+
+        await self.session.flush()
+        return alert
+
+    async def mark_alert_triggered(self, alert_id: UUID) -> Alert | None:
+        """Mark alert as triggered with current timestamp.
+
+        Args:
+            alert_id: Alert UUID
+
+        Returns:
+            Updated Alert or None
+        """
+        result = await self.session.execute(
+            select(Alert).where(Alert.id == alert_id)
+        )
+        alert = result.scalar_one_or_none()
+
+        if alert:
+            alert.last_triggered_at = datetime.now(timezone.utc)
+            await self.session.flush()
+
+        return alert
+
+    async def delete_alert(self, alert_id: UUID) -> bool:
+        """Delete an alert.
+
+        Args:
+            alert_id: Alert UUID
+
+        Returns:
+            True if deleted, False if not found
+        """
+        result = await self.session.execute(
+            select(Alert).where(Alert.id == alert_id)
+        )
+        alert = result.scalar_one_or_none()
+
+        if alert:
+            await self.session.delete(alert)
+            return True
+
+        return False
+
+    async def get_matching_alerts(self, event: Event) -> list[Alert]:
+        """Get alerts that match a given event.
+
+        Args:
+            event: Event to match against
+
+        Returns:
+            List of matching alerts
+        """
+        # Get all active alerts
+        result = await self.session.execute(
+            select(Alert).where(Alert.is_active == True)
+        )
+        alerts = list(result.scalars().all())
+
+        matching = []
+        for alert in alerts:
+            if self._alert_matches_event(alert, event):
+                matching.append(alert)
+
+        return matching
+
+    def _alert_matches_event(self, alert: Alert, event: Event) -> bool:
+        """Check if an alert matches an event.
+
+        Args:
+            alert: Alert to check
+            event: Event to match
+
+        Returns:
+            True if alert matches event
+        """
+        # Check ticker match
+        if alert.ticker and event.ticker:
+            if alert.ticker.upper() != event.ticker.upper():
+                return False
+
+        # Check event type match
+        if alert.event_types and event.event_type:
+            if event.event_type not in alert.event_types:
+                return False
+
+        # Check minimum alpha score
+        if alert.min_alpha_score is not None and event.alpha_score is not None:
+            if event.alpha_score < alert.min_alpha_score:
+                return False
+
+        # Check urgency level
+        if alert.urgency_levels and event.urgency_level:
+            if event.urgency_level not in alert.urgency_levels:
+                return False
+
+        # Check direction
+        if alert.direction and event.direction:
+            if alert.direction.lower() != event.direction.lower():
+                return False
+
+        return True
