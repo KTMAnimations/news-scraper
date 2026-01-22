@@ -1,0 +1,134 @@
+version: '3.8'
+
+# Production Docker Stack for VPS Deployment
+# Deploy with: docker stack deploy -c docker-stack.yml news-scraper
+
+services:
+  # FastAPI Backend
+  api:
+    image: ${REGISTRY}/news-scraper-api:${VERSION:-latest}
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - OPENSEARCH_URL=${OPENSEARCH_URL}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - JWT_ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - ENVIRONMENT=production
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+    networks:
+      - internal
+      - traefik-public
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Celery Workers
+  celery-worker:
+    image: ${REGISTRY}/news-scraper-api:${VERSION:-latest}
+    command: celery -A backend.workers.celery_app worker -l info -Q critical,high,default,low --concurrency=4
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - OPENSEARCH_URL=${OPENSEARCH_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+    deploy:
+      replicas: 4
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+    networks:
+      - internal
+
+  # Celery Beat Scheduler
+  celery-beat:
+    image: ${REGISTRY}/news-scraper-api:${VERSION:-latest}
+    command: celery -A backend.workers.celery_app beat -l info
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+    networks:
+      - internal
+
+  # WebSocket Server
+  websocket-server:
+    image: ${REGISTRY}/news-scraper-api:${VERSION:-latest}
+    command: uvicorn backend.api.websocket.streamer:router --host 0.0.0.0 --port 8001 --workers 4
+    environment:
+      - REDIS_URL=${REDIS_URL}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+      restart_policy:
+        condition: on-failure
+    networks:
+      - internal
+      - traefik-public
+
+  # Next.js Frontend
+  frontend:
+    image: ${REGISTRY}/news-scraper-frontend:${VERSION:-latest}
+    environment:
+      - NEXT_PUBLIC_API_URL=${API_URL}
+      - NEXT_PUBLIC_WS_URL=${WS_URL}
+      - NEXTAUTH_URL=${FRONTEND_URL}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+    networks:
+      - internal
+      - traefik-public
+
+networks:
+  internal:
+    driver: overlay
+    internal: true
+  traefik-public:
+    external: true
