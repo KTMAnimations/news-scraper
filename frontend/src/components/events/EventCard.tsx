@@ -9,14 +9,12 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
-  Zap,
 } from 'lucide-react';
 import type { Event } from '@/types/events';
 import {
   cn,
   formatRelativeTime,
   formatDateTime,
-  getUrgencyColor,
 } from '@/lib/utils';
 import { SentimentBadge } from './SentimentBadge';
 
@@ -37,70 +35,61 @@ export function EventCard({ event, compact = false }: EventCardProps) {
 
   const directionColor =
     event.direction === 'BULLISH'
-      ? 'text-bullish'
+      ? 'text-positive'
       : event.direction === 'BEARISH'
-      ? 'text-bearish'
-      : 'text-ink-muted';
+      ? 'text-negative'
+      : 'text-text-tertiary';
 
   const directionBg =
     event.direction === 'BULLISH'
-      ? 'bg-bullish-bg'
+      ? 'bg-positive-subtle'
       : event.direction === 'BEARISH'
-      ? 'bg-bearish-bg'
-      : 'bg-paper-warm';
+      ? 'bg-negative-subtle'
+      : 'bg-bg-tertiary';
 
   const isHighAlpha = event.alpha_score !== undefined && Math.abs(event.alpha_score) >= 0.7;
 
   return (
     <div
       className={cn(
-        'p-4 hover:bg-paper-warm transition-colors cursor-pointer border-b border-border',
-        isExpanded && 'bg-paper-warm'
+        'p-5 hover:bg-hover transition-colors cursor-pointer border-b border-border group',
+        isExpanded && 'bg-bg-secondary'
       )}
       onClick={() => setIsExpanded(!isExpanded)}
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-2.5 flex-wrap">
             {/* Ticker */}
-            <span className="font-mono text-accent font-semibold text-sm px-2 py-0.5 bg-accent-light rounded">
+            <span className="ticker-chip">
               {event.ticker}
             </span>
 
             {/* Event type badge */}
-            <span className="px-2 py-0.5 bg-paper-warm border border-border text-ink-muted text-xs rounded">
+            <span className="badge badge-neutral">
               {event.event_type.replace(/_/g, ' ')}
             </span>
 
             {/* High Alpha indicator */}
             {isHighAlpha && (
-              <span className="flex items-center gap-1 px-2 py-0.5 bg-accent text-paper text-xs rounded font-medium">
-                <Zap className="h-3 w-3" />
+              <span className="badge badge-accent font-medium">
                 High Alpha
               </span>
-            )}
-
-            {/* Urgency indicator */}
-            {event.urgency && (
-              <span
-                className={cn(
-                  'w-2 h-2 rounded-full',
-                  getUrgencyColor(event.urgency)
-                )}
-                title={`${event.urgency} urgency`}
-              />
             )}
           </div>
 
           {/* Headline */}
-          <h3 className={cn('text-ink font-medium leading-snug', compact ? 'text-sm' : 'text-base')}>
+          <h3 className={cn(
+            'text-text-primary font-medium leading-snug group-hover:text-accent transition-colors',
+            compact ? 'text-sm' : 'text-base'
+          )}>
             {event.headline}
           </h3>
 
           {/* Meta info */}
-          <div className="flex items-center gap-3 mt-2 text-xs text-ink-faint">
-            <span className="flex items-center gap-1">
+          <div className="flex items-center gap-3 mt-2.5 text-xs text-text-tertiary">
+            <span className="flex items-center gap-1.5">
               <Clock className="h-3 w-3" />
               {formatRelativeTime(event.event_time)}
             </span>
@@ -114,9 +103,9 @@ export function EventCard({ event, compact = false }: EventCardProps) {
         </div>
 
         {/* Right side - scores */}
-        <div className="flex flex-col items-end gap-2 shrink-0">
+        <div className="flex flex-col items-end gap-2.5 shrink-0">
           {/* Direction */}
-          <div className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-full', directionBg, directionColor)}>
+          <div className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-lg', directionBg, directionColor)}>
             <DirectionIcon className="h-3.5 w-3.5" />
             <span className="text-xs font-medium">{event.direction}</span>
           </div>
@@ -126,17 +115,17 @@ export function EventCard({ event, compact = false }: EventCardProps) {
             <div className="text-right">
               <div
                 className={cn(
-                  'font-mono text-xl font-semibold',
+                  'font-mono text-2xl font-bold',
                   isHighAlpha
                     ? 'text-accent'
                     : Math.abs(event.alpha_score) >= 0.4
-                    ? 'text-ink'
-                    : 'text-ink-muted'
+                    ? 'text-text-primary'
+                    : 'text-text-tertiary'
                 )}
               >
                 {(event.alpha_score * 100).toFixed(0)}
               </div>
-              <div className="text-2xs text-ink-faint uppercase tracking-wide">Alpha</div>
+              <div className="data-label">Alpha</div>
             </div>
           )}
         </div>
@@ -144,18 +133,18 @@ export function EventCard({ event, compact = false }: EventCardProps) {
 
       {/* Expanded content */}
       {isExpanded && (
-        <div className="mt-4 pt-4 border-t border-border">
+        <div className="mt-5 pt-5 border-t border-border animate-fade-in">
           {/* Summary */}
           {event.summary && (
-            <p className="text-sm text-ink-muted mb-4 leading-relaxed">{event.summary}</p>
+            <p className="text-sm text-text-secondary mb-5 leading-relaxed">{event.summary}</p>
           )}
 
           {/* Details grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-5 mb-5">
             {/* Sentiment */}
             {event.sentiment_label && (
               <div>
-                <div className="text-2xs text-ink-faint uppercase tracking-wide mb-1.5">Sentiment</div>
+                <div className="data-label mb-2">Sentiment</div>
                 <SentimentBadge
                   sentiment={event.sentiment_label}
                   confidence={event.sentiment_confidence}
@@ -165,8 +154,8 @@ export function EventCard({ event, compact = false }: EventCardProps) {
 
             {/* Event time */}
             <div>
-              <div className="text-2xs text-ink-faint uppercase tracking-wide mb-1.5">Event Time</div>
-              <div className="text-sm text-ink">
+              <div className="data-label mb-2">Event Time</div>
+              <div className="text-sm text-text-primary">
                 {formatDateTime(event.event_time)}
               </div>
             </div>
@@ -174,15 +163,10 @@ export function EventCard({ event, compact = false }: EventCardProps) {
             {/* Extracted tickers */}
             {event.extracted_tickers && event.extracted_tickers.length > 0 && (
               <div>
-                <div className="text-2xs text-ink-faint uppercase tracking-wide mb-1.5">
-                  Related Tickers
-                </div>
+                <div className="data-label mb-2">Related Tickers</div>
                 <div className="flex flex-wrap gap-1">
                   {event.extracted_tickers.map((ticker) => (
-                    <span
-                      key={ticker}
-                      className="px-1.5 py-0.5 bg-accent-light text-accent text-xs rounded font-mono"
-                    >
+                    <span key={ticker} className="ticker-chip text-xs">
                       {ticker}
                     </span>
                   ))}
@@ -193,8 +177,8 @@ export function EventCard({ event, compact = false }: EventCardProps) {
             {/* Extracted people */}
             {event.extracted_people && event.extracted_people.length > 0 && (
               <div>
-                <div className="text-2xs text-ink-faint uppercase tracking-wide mb-1.5">People</div>
-                <div className="text-sm text-ink">
+                <div className="data-label mb-2">People</div>
+                <div className="text-sm text-text-primary">
                   {event.extracted_people.join(', ')}
                 </div>
               </div>
@@ -207,7 +191,7 @@ export function EventCard({ event, compact = false }: EventCardProps) {
               href={event.source_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-sm text-accent hover:text-accent-dark transition-colors"
+              className="inline-flex items-center gap-1.5 text-sm text-accent hover:text-accent-hover transition-colors link-underline"
               onClick={(e) => e.stopPropagation()}
             >
               View source
@@ -218,11 +202,11 @@ export function EventCard({ event, compact = false }: EventCardProps) {
       )}
 
       {/* Expand indicator */}
-      <div className="flex justify-center mt-2">
+      <div className="flex justify-center mt-3">
         {isExpanded ? (
-          <ChevronUp className="h-4 w-4 text-ink-faint" />
+          <ChevronUp className="h-4 w-4 text-text-quaternary" />
         ) : (
-          <ChevronDown className="h-4 w-4 text-ink-faint" />
+          <ChevronDown className="h-4 w-4 text-text-quaternary" />
         )}
       </div>
     </div>

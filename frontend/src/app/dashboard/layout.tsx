@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Sidebar } from '@/components/layout/Sidebar';
-import { Activity } from 'lucide-react';
 
 export default function DashboardLayout({
   children,
@@ -23,12 +22,12 @@ export default function DashboardLayout({
 
   if (status === 'loading') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-paper">
+      <div className="min-h-screen flex items-center justify-center bg-bg-primary">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 bg-ink rounded-lg flex items-center justify-center animate-pulse">
-            <Activity className="h-6 w-6 text-paper" />
+          <div className="w-12 h-12 bg-text-primary rounded-xl flex items-center justify-center animate-pulse">
+            <span className="text-bg-primary font-mono font-bold text-lg">M</span>
           </div>
-          <p className="text-sm text-ink-muted">Loading...</p>
+          <p className="text-sm text-text-tertiary">Loading...</p>
         </div>
       </div>
     );
@@ -39,7 +38,7 @@ export default function DashboardLayout({
   }
 
   return (
-    <div className="min-h-screen bg-paper">
+    <div className="min-h-screen bg-bg-primary">
       <Header />
       <div className="flex">
         <Sidebar />

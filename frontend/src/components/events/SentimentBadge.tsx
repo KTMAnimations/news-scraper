@@ -15,9 +15,9 @@ export function SentimentBadge({
   showConfidence = true,
 }: SentimentBadgeProps) {
   const badgeClasses = cn(
-    'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium',
-    sentiment === 'positive' && 'badge-bullish',
-    sentiment === 'negative' && 'badge-bearish',
+    'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium',
+    sentiment === 'positive' && 'badge-positive',
+    sentiment === 'negative' && 'badge-negative',
     sentiment === 'neutral' && 'badge-neutral'
   );
 
@@ -33,9 +33,9 @@ export function SentimentBadge({
       <span
         className={cn(
           'w-1.5 h-1.5 rounded-full',
-          sentiment === 'positive' && 'bg-bullish',
-          sentiment === 'negative' && 'bg-bearish',
-          sentiment === 'neutral' && 'bg-ink-faint'
+          sentiment === 'positive' && 'bg-positive',
+          sentiment === 'negative' && 'bg-negative',
+          sentiment === 'neutral' && 'bg-text-tertiary'
         )}
       />
       {label}

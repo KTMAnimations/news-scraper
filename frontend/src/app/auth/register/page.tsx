@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Loader2, Mail, Lock, User, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Loader2, ArrowRight, Check } from 'lucide-react';
 import { api } from '@/lib/api';
 
 const registerSchema = z
@@ -27,7 +27,7 @@ const registerSchema = z
     path: ['confirmPassword'],
   });
 
-type RegisterForm = z.infer<typeof registerSchema>;
+type RegisterFormData = z.infer<typeof registerSchema>;
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -38,11 +38,11 @@ export default function RegisterPage() {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<RegisterForm>({
+  } = useForm<RegisterFormData>({
     resolver: zodResolver(registerSchema),
   });
 
-  const onSubmit = async (data: RegisterForm) => {
+  const onSubmit = async (data: RegisterFormData) => {
     setError(null);
 
     try {
@@ -58,13 +58,13 @@ export default function RegisterPage() {
 
   if (success) {
     return (
-      <div className="opacity-0 animate-fade-up">
-        <div className="card-elevated rounded-xl p-8 text-center">
-          <div className="w-16 h-16 rounded-full bg-bullish-bg mx-auto mb-4 flex items-center justify-center">
-            <CheckCircle2 className="h-8 w-8 text-bullish" />
+      <div className="animate-scale-in opacity-0">
+        <div className="card p-8 text-center rounded-2xl">
+          <div className="w-16 h-16 rounded-full bg-positive-subtle mx-auto mb-5 flex items-center justify-center">
+            <Check className="h-8 w-8 text-positive" strokeWidth={2.5} />
           </div>
-          <h2 className="font-serif text-2xl text-ink mb-2">Account created!</h2>
-          <p className="text-ink-muted">
+          <h2 className="text-2xl font-bold text-text-primary mb-2">Account created!</h2>
+          <p className="text-text-secondary">
             Redirecting you to sign in...
           </p>
         </div>
@@ -73,11 +73,13 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="opacity-0 animate-fade-up">
+    <div className="animate-fade-up opacity-0">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="font-serif text-3xl text-ink mb-2">Create your account</h1>
-        <p className="text-ink-muted">
+        <h1 className="text-3xl font-bold text-text-primary mb-2 tracking-tight">
+          Create your account
+        </h1>
+        <p className="text-text-secondary">
           Start your 14-day free trial. No credit card required.
         </p>
       </div>
@@ -85,114 +87,99 @@ export default function RegisterPage() {
       {/* Form */}
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
         {error && (
-          <div className="bg-bearish-bg border border-bearish/20 text-bearish px-4 py-3 rounded-lg text-sm flex items-start gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-bearish mt-1.5 flex-shrink-0" />
+          <div className="bg-negative-subtle border border-negative/20 text-negative px-4 py-3 rounded-xl text-sm flex items-center gap-3">
+            <div className="w-2 h-2 rounded-full bg-negative flex-shrink-0" />
             {error}
           </div>
         )}
 
-        <div>
+        <div className="space-y-2">
           <label
             htmlFor="full_name"
-            className="block text-sm font-medium text-ink mb-2"
+            className="block text-sm font-medium text-text-primary"
           >
             Full Name
           </label>
-          <div className="relative">
-            <User className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-faint" />
-            <input
-              {...register('full_name')}
-              type="text"
-              id="full_name"
-              autoComplete="name"
-              className="input w-full pl-11 pr-4 py-3 rounded-lg text-ink placeholder-ink-faint"
-              placeholder="John Doe"
-            />
-          </div>
+          <input
+            {...register('full_name')}
+            type="text"
+            id="full_name"
+            autoComplete="name"
+            className="input py-3"
+            placeholder="John Doe"
+          />
           {errors.full_name && (
-            <p className="mt-1.5 text-sm text-bearish">
-              {errors.full_name.message}
-            </p>
+            <p className="text-sm text-negative">{errors.full_name.message}</p>
           )}
         </div>
 
-        <div>
+        <div className="space-y-2">
           <label
             htmlFor="email"
-            className="block text-sm font-medium text-ink mb-2"
+            className="block text-sm font-medium text-text-primary"
           >
             Email
           </label>
-          <div className="relative">
-            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-faint" />
-            <input
-              {...register('email')}
-              type="email"
-              id="email"
-              autoComplete="email"
-              className="input w-full pl-11 pr-4 py-3 rounded-lg text-ink placeholder-ink-faint"
-              placeholder="you@example.com"
-            />
-          </div>
+          <input
+            {...register('email')}
+            type="email"
+            id="email"
+            autoComplete="email"
+            className="input py-3"
+            placeholder="you@example.com"
+          />
           {errors.email && (
-            <p className="mt-1.5 text-sm text-bearish">{errors.email.message}</p>
+            <p className="text-sm text-negative">{errors.email.message}</p>
           )}
         </div>
 
-        <div>
+        <div className="space-y-2">
           <label
             htmlFor="password"
-            className="block text-sm font-medium text-ink mb-2"
+            className="block text-sm font-medium text-text-primary"
           >
             Password
           </label>
-          <div className="relative">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-faint" />
-            <input
-              {...register('password')}
-              type="password"
-              id="password"
-              autoComplete="new-password"
-              className="input w-full pl-11 pr-4 py-3 rounded-lg text-ink placeholder-ink-faint"
-              placeholder="Create a strong password"
-            />
-          </div>
+          <input
+            {...register('password')}
+            type="password"
+            id="password"
+            autoComplete="new-password"
+            className="input py-3"
+            placeholder="Create a strong password"
+          />
           {errors.password && (
-            <p className="mt-1.5 text-sm text-bearish">
-              {errors.password.message}
-            </p>
+            <p className="text-sm text-negative">{errors.password.message}</p>
           )}
+          <p className="text-xs text-text-tertiary">
+            Must be at least 8 characters with uppercase, lowercase, and number
+          </p>
         </div>
 
-        <div>
+        <div className="space-y-2">
           <label
             htmlFor="confirmPassword"
-            className="block text-sm font-medium text-ink mb-2"
+            className="block text-sm font-medium text-text-primary"
           >
             Confirm Password
           </label>
-          <div className="relative">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-faint" />
-            <input
-              {...register('confirmPassword')}
-              type="password"
-              id="confirmPassword"
-              autoComplete="new-password"
-              className="input w-full pl-11 pr-4 py-3 rounded-lg text-ink placeholder-ink-faint"
-              placeholder="Confirm your password"
-            />
-          </div>
+          <input
+            {...register('confirmPassword')}
+            type="password"
+            id="confirmPassword"
+            autoComplete="new-password"
+            className="input py-3"
+            placeholder="Confirm your password"
+          />
           {errors.confirmPassword && (
-            <p className="mt-1.5 text-sm text-bearish">
-              {errors.confirmPassword.message}
-            </p>
+            <p className="text-sm text-negative">{errors.confirmPassword.message}</p>
           )}
         </div>
 
         <button
           type="submit"
           disabled={isSubmitting}
-          className="btn btn-primary w-full py-3 rounded-lg flex items-center justify-center gap-2 mt-6"
+          className="btn btn-primary w-full py-3 mt-2 flex items-center justify-center gap-2"
         >
           {isSubmitting ? (
             <>
@@ -209,23 +196,23 @@ export default function RegisterPage() {
       </form>
 
       {/* Footer */}
-      <p className="mt-8 text-center text-sm text-ink-muted">
+      <p className="mt-8 text-center text-sm text-text-secondary">
         Already have an account?{' '}
         <Link
           href="/auth/login"
-          className="text-accent hover:text-accent-dark font-medium transition-colors editorial-underline pb-0.5"
+          className="text-accent hover:text-accent-hover font-medium transition-colors link-underline"
         >
           Sign in
         </Link>
       </p>
 
-      <p className="mt-4 text-xs text-ink-faint text-center leading-relaxed">
+      <p className="mt-4 text-xs text-text-quaternary text-center leading-relaxed">
         By creating an account, you agree to our{' '}
-        <Link href="/terms" className="underline hover:text-ink-muted">
+        <Link href="/terms" className="text-text-tertiary hover:text-text-secondary transition-colors">
           Terms of Service
         </Link>{' '}
         and{' '}
-        <Link href="/privacy" className="underline hover:text-ink-muted">
+        <Link href="/privacy" className="text-text-tertiary hover:text-text-secondary transition-colors">
           Privacy Policy
         </Link>
         .

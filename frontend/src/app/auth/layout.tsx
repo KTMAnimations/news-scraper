@@ -1,5 +1,38 @@
+'use client';
+
 import Link from 'next/link';
-import { Activity } from 'lucide-react';
+import { useEffect, useState } from 'react';
+
+// Animated data ticker for visual interest
+function DataTicker() {
+  const [offset, setOffset] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setOffset((prev) => (prev + 1) % 100);
+    }, 50);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="absolute inset-0 overflow-hidden opacity-10">
+      <div
+        className="flex flex-col gap-4 font-mono text-xs text-bg-primary whitespace-nowrap"
+        style={{ transform: `translateY(-${offset * 0.5}px)` }}
+      >
+        {Array.from({ length: 30 }).map((_, i) => (
+          <div key={i} className="flex gap-8">
+            <span>ABCD +2.4%</span>
+            <span>EFGH -1.2%</span>
+            <span>IJKL +5.8%</span>
+            <span>MNOP -0.3%</span>
+            <span>QRST +1.9%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function AuthLayout({
   children,
@@ -7,75 +40,72 @@ export default function AuthLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-paper flex">
+    <div className="min-h-screen bg-bg-primary flex">
       {/* Left panel - Branding */}
-      <div className="hidden lg:flex lg:w-1/2 xl:w-2/5 bg-ink relative overflow-hidden">
-        {/* Subtle pattern */}
-        <div
-          className="absolute inset-0 opacity-[0.03]"
-          style={{
-            backgroundImage: `
-              linear-gradient(hsl(var(--paper)) 1px, transparent 1px),
-              linear-gradient(90deg, hsl(var(--paper)) 1px, transparent 1px)
-            `,
-            backgroundSize: '40px 40px',
-          }}
-        />
+      <div className="hidden lg:flex lg:w-1/2 xl:w-[55%] bg-text-primary relative overflow-hidden">
+        {/* Animated background */}
+        <DataTicker />
 
-        <div className="relative z-10 flex flex-col justify-between p-12 w-full">
+        {/* Gradient overlays */}
+        <div className="absolute inset-0 bg-gradient-to-br from-accent/20 via-transparent to-positive/10 pointer-events-none" />
+        <div className="absolute bottom-0 left-0 right-0 h-1/2 bg-gradient-to-t from-text-primary to-transparent pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col justify-between p-12 xl:p-16 w-full">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 bg-paper rounded-md flex items-center justify-center group-hover:scale-105 transition-transform">
-              <Activity className="h-5 w-5 text-ink" strokeWidth={2.5} />
+          <Link href="/" className="flex items-center gap-2.5 group">
+            <div className="w-9 h-9 bg-bg-primary rounded-lg flex items-center justify-center group-hover:scale-105 transition-transform">
+              <span className="text-text-primary font-mono font-bold text-sm">M</span>
             </div>
-            <div className="flex flex-col">
-              <span className="font-serif text-xl text-paper tracking-tight">Micro-Alpha</span>
-              <span className="text-2xs text-paper/50 uppercase tracking-widest">Sentiment Intelligence</span>
-            </div>
+            <span className="font-semibold text-lg text-bg-primary tracking-tight">Micro-Alpha</span>
           </Link>
 
-          {/* Feature highlights */}
-          <div className="space-y-8">
+          {/* Main content */}
+          <div className="space-y-10">
             <div>
-              <div className="font-mono text-accent text-sm mb-2">&lt;2s latency</div>
-              <h2 className="font-serif text-3xl text-paper leading-tight mb-3">
-                Alpha signals for<br />
-                <span className="italic text-paper/70">micro-cap</span> securities
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-bg-primary/10 border border-bg-primary/20 mb-6">
+                <div className="w-2 h-2 rounded-full bg-positive animate-pulse" />
+                <span className="text-sm font-medium text-bg-primary/90">Live Feed Active</span>
+              </div>
+
+              <h2 className="text-4xl xl:text-5xl font-bold text-bg-primary leading-[1.15] mb-5 tracking-tight">
+                Trade micro-caps
+                <br />
+                <span className="text-bg-primary/60">with conviction</span>
               </h2>
-              <p className="text-paper/60 leading-relaxed max-w-md">
-                Real-time sentiment analysis on SEC filings, news, and social data.
-                Get actionable signals before mainstream providers.
+              <p className="text-bg-primary/60 text-lg leading-relaxed max-w-md">
+                AI-powered sentiment analysis on SEC filings, breaking news, and social signals.
               </p>
             </div>
 
-            <div className="flex gap-8">
-              <div>
-                <div className="font-mono text-2xl text-paper font-semibold">97%</div>
-                <div className="text-sm text-paper/50">FinBERT Accuracy</div>
-              </div>
-              <div>
-                <div className="font-mono text-2xl text-paper font-semibold">50+</div>
-                <div className="text-sm text-paper/50">Data Sources</div>
-              </div>
-              <div>
-                <div className="font-mono text-2xl text-paper font-semibold">24/7</div>
-                <div className="text-sm text-paper/50">Monitoring</div>
-              </div>
+            {/* Stats */}
+            <div className="flex gap-10">
+              {[
+                { value: '<2s', label: 'Latency' },
+                { value: '97%', label: 'Accuracy' },
+                { value: '50+', label: 'Sources' },
+              ].map((stat) => (
+                <div key={stat.label}>
+                  <div className="font-mono text-3xl text-bg-primary font-semibold tracking-tight">
+                    {stat.value}
+                  </div>
+                  <div className="text-sm text-bg-primary/50 mt-1">{stat.label}</div>
+                </div>
+              ))}
             </div>
           </div>
 
           {/* Testimonial */}
-          <div className="border-t border-paper/10 pt-8">
-            <blockquote className="text-paper/80 italic font-serif text-lg mb-4">
-              &ldquo;The only platform that consistently surfaces alpha before Bloomberg terminals.&rdquo;
+          <div className="pt-8 border-t border-bg-primary/10">
+            <blockquote className="text-bg-primary/80 text-lg mb-4 leading-relaxed">
+              "The only platform that consistently surfaces alpha before Bloomberg terminals."
             </blockquote>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-paper/10 flex items-center justify-center text-paper/60 font-medium">
-                JR
+              <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center">
+                <span className="font-mono font-semibold text-sm text-accent">JR</span>
               </div>
               <div>
-                <div className="text-paper text-sm font-medium">James Rodriguez</div>
-                <div className="text-paper/50 text-sm">PM, Apex Capital</div>
+                <div className="text-bg-primary text-sm font-medium">James Rodriguez</div>
+                <div className="text-bg-primary/50 text-sm">PM, Apex Capital</div>
               </div>
             </div>
           </div>
@@ -83,27 +113,30 @@ export default function AuthLayout({
       </div>
 
       {/* Right panel - Auth form */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col relative">
+        {/* Subtle background gradient */}
+        <div className="absolute inset-0 bg-gradient-to-br from-bg-secondary/30 via-transparent to-accent/5 pointer-events-none" />
+
         {/* Mobile header */}
-        <div className="lg:hidden border-b border-border p-4">
+        <div className="lg:hidden border-b border-border p-4 relative z-10">
           <Link href="/" className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-ink rounded-md flex items-center justify-center">
-              <Activity className="h-4 w-4 text-paper" strokeWidth={2.5} />
+            <div className="w-8 h-8 bg-text-primary rounded-lg flex items-center justify-center">
+              <span className="text-bg-primary font-mono font-bold text-xs">M</span>
             </div>
-            <span className="font-serif text-lg text-ink">Micro-Alpha</span>
+            <span className="font-semibold text-lg text-text-primary">Micro-Alpha</span>
           </Link>
         </div>
 
         {/* Form container */}
-        <div className="flex-1 flex items-center justify-center p-6 sm:p-12">
+        <div className="flex-1 flex items-center justify-center p-6 sm:p-12 relative z-10">
           <div className="w-full max-w-md">
             {children}
           </div>
         </div>
 
         {/* Footer */}
-        <div className="border-t border-border p-6 text-center">
-          <p className="text-sm text-ink-faint">
+        <div className="border-t border-border p-6 text-center relative z-10">
+          <p className="text-sm text-text-quaternary">
             &copy; {new Date().getFullYear()} Micro-Alpha. All rights reserved.
           </p>
         </div>
