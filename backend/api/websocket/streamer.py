@@ -51,6 +51,9 @@ class EventStreamer:
             self._running = True
             asyncio.create_task(self._listen())
 
+            # Start heartbeat monitoring for WebSocket connections
+            await self.manager.start_heartbeat()
+
             logger.info("Event streamer started")
 
         except Exception as e:
@@ -59,6 +62,9 @@ class EventStreamer:
     async def stop(self) -> None:
         """Stop the event streamer."""
         self._running = False
+
+        # Stop heartbeat monitoring
+        await self.manager.stop_heartbeat()
 
         if self._pubsub:
             await self._pubsub.unsubscribe()
@@ -117,15 +123,17 @@ class EventStreamer:
             logger.error("Failed to handle message", error=str(e))
 
     async def _broadcast_event(self, event: dict[str, Any]) -> None:
-        """Broadcast event to all connections."""
-        await self.manager.broadcast({
+        """Broadcast event to subscribers only (respects per-ticker subscriptions)."""
+        ticker = event.get("ticker")
+        await self.manager.broadcast_to_subscribers(ticker, {
             "type": "event",
             "data": event,
         })
 
     async def _broadcast_high_alpha(self, event: dict[str, Any]) -> None:
-        """Broadcast high-alpha event."""
-        await self.manager.broadcast({
+        """Broadcast high-alpha event to subscribers only."""
+        ticker = event.get("ticker")
+        await self.manager.broadcast_to_subscribers(ticker, {
             "type": "high_alpha",
             "data": event,
         })
@@ -136,7 +144,7 @@ class EventStreamer:
         event: dict[str, Any],
     ) -> None:
         """Broadcast event to ticker subscribers."""
-        await self.manager.broadcast_to_ticker(ticker, {
+        await self.manager.broadcast_to_subscribers(ticker, {
             "type": "ticker_event",
             "ticker": ticker,
             "data": event,
@@ -175,19 +183,90 @@ class EventStreamer:
 
 
 # FastAPI WebSocket endpoint
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from jose import JWTError, jwt
 import uuid
 
 router = APIRouter()
 
 
-@router.websocket("/ws/events")
-async def websocket_events(websocket: WebSocket):
-    """WebSocket endpoint for all events."""
-    connection_id = str(uuid.uuid4())
+# WebSocket close codes
+WS_CLOSE_NORMAL = 1000
+WS_CLOSE_UNAUTHORIZED = 4001
+WS_CLOSE_FORBIDDEN = 4003
+WS_CLOSE_TOKEN_EXPIRED = 4004
 
-    await manager.connect(websocket, connection_id)
+
+async def validate_websocket_token(token: str | None) -> dict | None:
+    """Validate JWT token for WebSocket authentication.
+
+    Args:
+        token: JWT access token
+
+    Returns:
+        Token payload if valid, None otherwise
+    """
+    if not token:
+        return None
+
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+
+        # Verify token type
+        if payload.get("type") != "access":
+            logger.warning("Invalid token type for WebSocket", token_type=payload.get("type"))
+            return None
+
+        user_id = payload.get("sub")
+        if not user_id:
+            return None
+
+        return payload
+
+    except jwt.ExpiredSignatureError:
+        logger.warning("Expired token used for WebSocket authentication")
+        return None
+    except JWTError as e:
+        logger.warning("Invalid token for WebSocket authentication", error=str(e))
+        return None
+
+
+@router.websocket("/ws/events")
+async def websocket_events(websocket: WebSocket, token: str | None = Query(default=None)):
+    """WebSocket endpoint for all events.
+
+    Optionally accepts a JWT token for authentication. If authenticated,
+    the connection can access premium features.
+
+    Query params:
+        token: Optional JWT access token for authentication
+    """
+    connection_id = str(uuid.uuid4())
+    user_id = None
+
+    # Validate token if provided
+    if token:
+        payload = await validate_websocket_token(token)
+        if payload:
+            user_id = payload.get("sub")
+            logger.info(
+                "Authenticated WebSocket connection",
+                connection_id=connection_id,
+                user_id=user_id,
+            )
+
+    await manager.connect(websocket, connection_id, user_id=user_id)
+
+    # Send welcome message with connection info
+    await manager.send_personal(connection_id, {
+        "type": "connected",
+        "connection_id": connection_id,
+        "authenticated": user_id is not None,
+    })
 
     try:
         while True:
@@ -199,29 +278,99 @@ async def websocket_events(websocket: WebSocket):
         await manager.disconnect(connection_id)
 
 
-@router.websocket("/ws/events/watchlist")
-async def websocket_watchlist(websocket: WebSocket, token: str):
-    """WebSocket endpoint for watchlist events (authenticated)."""
-    try:
-        payload = jwt.decode(
-            token,
-            settings.jwt_secret_key,
-            algorithms=[settings.jwt_algorithm],
-        )
-        user_id = payload.get("sub")
-        if not user_id:
-            await websocket.close(code=4001)
-            return
-    except JWTError:
-        await websocket.close(code=4001)
+@router.websocket("/ws/events/authenticated")
+async def websocket_events_authenticated(websocket: WebSocket, token: str = Query(...)):
+    """WebSocket endpoint requiring authentication.
+
+    This endpoint requires a valid JWT access token. Connections without
+    a valid token will be immediately closed.
+
+    Query params:
+        token: JWT access token (required)
+    """
+    # Validate token
+    payload = await validate_websocket_token(token)
+    if not payload:
+        await websocket.close(code=WS_CLOSE_UNAUTHORIZED)
         return
 
+    user_id = payload.get("sub")
+    connection_id = str(uuid.uuid4())
+
+    # Verify user exists and is active
+    try:
+        from backend.storage.timescale import get_db_session
+        from backend.storage.timescale.queries import UserQueries
+
+        async for session in get_db_session():
+            queries = UserQueries(session)
+            user = await queries.get_user_by_id(user_id)
+
+            if not user:
+                logger.warning("WebSocket auth: user not found", user_id=user_id)
+                await websocket.close(code=WS_CLOSE_UNAUTHORIZED)
+                return
+
+            if not user.is_active:
+                logger.warning("WebSocket auth: user inactive", user_id=user_id)
+                await websocket.close(code=WS_CLOSE_FORBIDDEN)
+                return
+
+            break
+
+    except Exception as e:
+        logger.error("WebSocket auth: database error", error=str(e))
+        await websocket.close(code=WS_CLOSE_UNAUTHORIZED)
+        return
+
+    await manager.connect(websocket, connection_id, user_id=user_id)
+
+    # Send welcome message with user info
+    await manager.send_personal(connection_id, {
+        "type": "connected",
+        "connection_id": connection_id,
+        "authenticated": True,
+        "user_id": user_id,
+    })
+
+    logger.info(
+        "Authenticated WebSocket connected",
+        connection_id=connection_id,
+        user_id=user_id,
+    )
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            await _handle_client_message(connection_id, data)
+
+    except WebSocketDisconnect:
+        await manager.disconnect(connection_id)
+
+
+@router.websocket("/ws/events/watchlist")
+async def websocket_watchlist(websocket: WebSocket, token: str = Query(...)):
+    """WebSocket endpoint for watchlist events (authenticated).
+
+    Automatically subscribes to all tickers in the user's watchlist.
+
+    Query params:
+        token: JWT access token (required)
+    """
+    # Validate token
+    payload = await validate_websocket_token(token)
+    if not payload:
+        await websocket.close(code=WS_CLOSE_UNAUTHORIZED)
+        return
+
+    user_id = payload.get("sub")
     connection_id = str(uuid.uuid4())
     await manager.connect(websocket, connection_id, user_id=user_id)
 
     # Subscribe to user's watchlist tickers from database
     try:
-        from backend.storage.timescale import get_db_session, WatchlistQueries
+        from backend.storage.timescale import get_db_session
+        from backend.storage.timescale.queries import WatchlistQueries
 
         async for session in get_db_session():
             queries = WatchlistQueries(session)
@@ -238,6 +387,8 @@ async def websocket_watchlist(websocket: WebSocket, token: str):
             # Send confirmation with subscribed tickers
             await manager.send_personal(connection_id, {
                 "type": "watchlist_loaded",
+                "connection_id": connection_id,
+                "authenticated": True,
                 "tickers": [item.ticker for item in watchlist_items],
             })
             break  # Only need one session
@@ -259,12 +410,41 @@ async def websocket_watchlist(websocket: WebSocket, token: str):
 
 
 @router.websocket("/ws/events/ticker/{ticker}")
-async def websocket_ticker(websocket: WebSocket, ticker: str):
-    """WebSocket endpoint for single ticker events."""
-    connection_id = str(uuid.uuid4())
+async def websocket_ticker(
+    websocket: WebSocket,
+    ticker: str,
+    token: str | None = Query(default=None),
+):
+    """WebSocket endpoint for single ticker events.
 
-    await manager.connect(websocket, connection_id)
+    Automatically subscribes to the specified ticker. Optionally accepts
+    authentication for premium features.
+
+    Path params:
+        ticker: Ticker symbol to subscribe to
+
+    Query params:
+        token: Optional JWT access token for authentication
+    """
+    connection_id = str(uuid.uuid4())
+    user_id = None
+
+    # Validate token if provided
+    if token:
+        payload = await validate_websocket_token(token)
+        if payload:
+            user_id = payload.get("sub")
+
+    await manager.connect(websocket, connection_id, user_id=user_id)
     await manager.subscribe(connection_id, ticker)
+
+    # Send welcome message
+    await manager.send_personal(connection_id, {
+        "type": "connected",
+        "connection_id": connection_id,
+        "authenticated": user_id is not None,
+        "subscribed_ticker": ticker.upper(),
+    })
 
     try:
         while True:
@@ -276,14 +456,39 @@ async def websocket_ticker(websocket: WebSocket, ticker: str):
 
 
 @router.websocket("/ws/events/high-alpha")
-async def websocket_high_alpha(websocket: WebSocket):
-    """WebSocket endpoint for high-alpha events only."""
+async def websocket_high_alpha(
+    websocket: WebSocket,
+    token: str | None = Query(default=None),
+):
+    """WebSocket endpoint for high-alpha events only.
+
+    Subscribes to the wildcard to receive all high-alpha events.
+    Optionally accepts authentication for premium features.
+
+    Query params:
+        token: Optional JWT access token for authentication
+    """
     connection_id = str(uuid.uuid4())
+    user_id = None
 
-    await manager.connect(websocket, connection_id)
+    # Validate token if provided
+    if token:
+        payload = await validate_websocket_token(token)
+        if payload:
+            user_id = payload.get("sub")
 
-    # This connection only receives high-alpha broadcasts
-    # Implementation would filter in _handle_client_message
+    await manager.connect(websocket, connection_id, user_id=user_id)
+
+    # Subscribe to wildcard for all high-alpha events
+    await manager.subscribe(connection_id, "*")
+
+    # Send welcome message
+    await manager.send_personal(connection_id, {
+        "type": "connected",
+        "connection_id": connection_id,
+        "authenticated": user_id is not None,
+        "subscription_type": "high_alpha",
+    })
 
     try:
         while True:
@@ -300,29 +505,75 @@ async def _handle_client_message(
 ) -> None:
     """Handle message from WebSocket client.
 
+    Supported messages:
+    - {"action": "subscribe", "tickers": ["AAPL", "TSLA"]} - Subscribe to multiple tickers
+    - {"action": "subscribe", "ticker": "AAPL"} - Subscribe to single ticker (legacy)
+    - {"action": "unsubscribe", "tickers": ["AAPL"]} - Unsubscribe from multiple tickers
+    - {"action": "unsubscribe", "ticker": "AAPL"} - Unsubscribe from single ticker (legacy)
+    - {"action": "subscribe", "tickers": ["*"]} - Subscribe to all events (wildcard)
+    - {"type": "pong"} - Heartbeat response
+    - {"action": "ping"} - Client-initiated ping (legacy)
+    - {"action": "list_subscriptions"} - List current subscriptions
+
     Args:
         connection_id: Client connection ID
         data: Message data
     """
     action = data.get("action")
+    message_type = data.get("type")
+
+    # Handle pong response (heartbeat)
+    if message_type == "pong" or action == "pong":
+        await manager.handle_pong(connection_id)
+        return
 
     if action == "subscribe":
-        ticker = data.get("ticker")
-        if ticker:
-            await manager.subscribe(connection_id, ticker)
+        # Support both array format and single ticker format
+        tickers = data.get("tickers", [])
+        single_ticker = data.get("ticker")
+
+        if single_ticker and not tickers:
+            tickers = [single_ticker]
+
+        if tickers:
+            subscribed = await manager.subscribe_many(connection_id, tickers)
             await manager.send_personal(connection_id, {
                 "type": "subscribed",
-                "ticker": ticker,
+                "tickers": subscribed,
             })
+            logger.info(
+                "Client subscribed to tickers",
+                connection_id=connection_id,
+                tickers=subscribed,
+            )
 
     elif action == "unsubscribe":
-        ticker = data.get("ticker")
-        if ticker:
-            await manager.unsubscribe(connection_id, ticker)
+        # Support both array format and single ticker format
+        tickers = data.get("tickers", [])
+        single_ticker = data.get("ticker")
+
+        if single_ticker and not tickers:
+            tickers = [single_ticker]
+
+        if tickers:
+            unsubscribed = await manager.unsubscribe_many(connection_id, tickers)
             await manager.send_personal(connection_id, {
                 "type": "unsubscribed",
-                "ticker": ticker,
+                "tickers": unsubscribed,
             })
+            logger.info(
+                "Client unsubscribed from tickers",
+                connection_id=connection_id,
+                tickers=unsubscribed,
+            )
 
     elif action == "ping":
+        # Legacy client-initiated ping
         await manager.send_personal(connection_id, {"type": "pong"})
+
+    elif action == "list_subscriptions":
+        subscriptions = manager.get_subscriptions(connection_id)
+        await manager.send_personal(connection_id, {
+            "type": "subscriptions",
+            "tickers": list(subscriptions),
+        })

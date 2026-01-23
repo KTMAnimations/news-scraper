@@ -1,8 +1,21 @@
-"""Aggregator for cross-platform social sentiment."""
+"""Aggregator for cross-platform social sentiment.
+
+This module provides sentiment aggregation across multiple social platforms:
+- Twitter/X
+- Reddit
+- StockTwits
+
+Features:
+- Weighted sentiment calculation per platform
+- Caching of aggregated sentiment
+- Database storage of sentiment snapshots
+- Trend analysis (velocity and momentum)
+"""
 
 import asyncio
+import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import structlog
@@ -12,6 +25,13 @@ from .stocktwits_client import StockTwitsClient
 from .twitter_stream import TwitterStream
 
 logger = structlog.get_logger(__name__)
+
+
+def _get_redis_client():
+    """Get Redis client for caching."""
+    import redis
+    from backend.config import settings
+    return redis.from_url(str(settings.redis_url))
 
 
 @dataclass
@@ -43,6 +63,47 @@ class AggregatedSentiment:
     # Raw data
     top_influencers: list[dict[str, Any]] = field(default_factory=list)
     sample_messages: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "symbol": self.symbol,
+            "timestamp": self.timestamp,
+            "twitter_mentions": self.twitter_mentions,
+            "reddit_mentions": self.reddit_mentions,
+            "stocktwits_mentions": self.stocktwits_mentions,
+            "twitter_sentiment": self.twitter_sentiment,
+            "reddit_sentiment": self.reddit_sentiment,
+            "stocktwits_sentiment": self.stocktwits_sentiment,
+            "total_mentions": self.total_mentions,
+            "overall_sentiment": self.overall_sentiment,
+            "sentiment_label": self.sentiment_label,
+            "mention_velocity": self.mention_velocity,
+            "sentiment_momentum": self.sentiment_momentum,
+            "top_influencers": self.top_influencers,
+            "sample_messages": self.sample_messages,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AggregatedSentiment":
+        """Create from dictionary."""
+        return cls(
+            symbol=data.get("symbol", ""),
+            timestamp=data.get("timestamp", ""),
+            twitter_mentions=data.get("twitter_mentions", 0),
+            reddit_mentions=data.get("reddit_mentions", 0),
+            stocktwits_mentions=data.get("stocktwits_mentions", 0),
+            twitter_sentiment=data.get("twitter_sentiment", 0.5),
+            reddit_sentiment=data.get("reddit_sentiment", 0.5),
+            stocktwits_sentiment=data.get("stocktwits_sentiment", 0.5),
+            total_mentions=data.get("total_mentions", 0),
+            overall_sentiment=data.get("overall_sentiment", 0.5),
+            sentiment_label=data.get("sentiment_label", "neutral"),
+            mention_velocity=data.get("mention_velocity", 0.0),
+            sentiment_momentum=data.get("sentiment_momentum", 0.0),
+            top_influencers=data.get("top_influencers", []),
+            sample_messages=data.get("sample_messages", []),
+        )
 
 
 class SocialSentimentAggregator:
@@ -399,6 +460,210 @@ class SocialSentimentAggregator:
             "event_time": sentiment.timestamp,
             "source": "social_aggregate",
         }
+
+    def cache_sentiment(self, sentiment: AggregatedSentiment) -> bool:
+        """Cache aggregated sentiment to Redis.
+
+        Args:
+            sentiment: AggregatedSentiment object
+
+        Returns:
+            True if cached successfully
+        """
+        try:
+            client = _get_redis_client()
+            key = f"sentiment:ticker:{sentiment.symbol}"
+
+            # Store current sentiment with TTL
+            client.setex(
+                key,
+                timedelta(minutes=15),
+                json.dumps(sentiment.to_dict()),
+            )
+
+            # Store in time-series for historical tracking
+            history_key = f"sentiment:history:{sentiment.symbol}"
+            client.zadd(
+                history_key,
+                {json.dumps(sentiment.to_dict()): datetime.now(timezone.utc).timestamp()},
+            )
+            # Keep only last 24 hours of history (assume ~4 samples per hour)
+            client.zremrangebyrank(history_key, 0, -97)
+
+            client.close()
+            return True
+
+        except Exception as e:
+            logger.warning("Failed to cache sentiment", symbol=sentiment.symbol, error=str(e))
+            return False
+
+    def get_cached_sentiment(self, symbol: str) -> AggregatedSentiment | None:
+        """Get cached sentiment for a symbol.
+
+        Args:
+            symbol: Stock ticker symbol
+
+        Returns:
+            AggregatedSentiment or None if not cached
+        """
+        try:
+            client = _get_redis_client()
+            key = f"sentiment:ticker:{symbol.upper()}"
+            data = client.get(key)
+            client.close()
+
+            if data:
+                return AggregatedSentiment.from_dict(json.loads(data))
+
+        except Exception as e:
+            logger.warning("Failed to get cached sentiment", symbol=symbol, error=str(e))
+
+        return None
+
+    def get_sentiment_history(
+        self,
+        symbol: str,
+        hours: int = 24,
+    ) -> list[AggregatedSentiment]:
+        """Get sentiment history for a symbol.
+
+        Args:
+            symbol: Stock ticker symbol
+            hours: Number of hours of history
+
+        Returns:
+            List of historical AggregatedSentiment objects
+        """
+        try:
+            client = _get_redis_client()
+            history_key = f"sentiment:history:{symbol.upper()}"
+
+            # Get entries from last N hours
+            min_score = (datetime.now(timezone.utc) - timedelta(hours=hours)).timestamp()
+            entries = client.zrangebyscore(history_key, min_score, "+inf")
+            client.close()
+
+            history = []
+            for entry in entries:
+                try:
+                    data = json.loads(entry)
+                    history.append(AggregatedSentiment.from_dict(data))
+                except Exception:
+                    continue
+
+            return history
+
+        except Exception as e:
+            logger.warning("Failed to get sentiment history", symbol=symbol, error=str(e))
+            return []
+
+    def _calculate_velocity_and_momentum(
+        self,
+        current: AggregatedSentiment,
+    ) -> tuple[float, float]:
+        """Calculate mention velocity and sentiment momentum.
+
+        Args:
+            current: Current aggregated sentiment
+
+        Returns:
+            Tuple of (velocity, momentum)
+        """
+        try:
+            # Get recent history
+            history = self.get_sentiment_history(current.symbol, hours=1)
+
+            if not history:
+                return 0.0, 0.0
+
+            # Calculate velocity (mentions per hour)
+            total_recent_mentions = sum(h.total_mentions for h in history)
+            hours_covered = max(1, len(history) / 4)  # Assume 4 samples per hour
+            velocity = total_recent_mentions / hours_covered
+
+            # Calculate momentum (sentiment change)
+            if len(history) >= 2:
+                old_sentiment = history[0].overall_sentiment
+                momentum = current.overall_sentiment - old_sentiment
+            else:
+                momentum = 0.0
+
+            return velocity, momentum
+
+        except Exception as e:
+            logger.warning("Failed to calculate velocity/momentum", error=str(e))
+            return 0.0, 0.0
+
+    async def get_aggregated_sentiment_with_cache(
+        self,
+        symbol: str,
+        max_cache_age_minutes: int = 5,
+    ) -> AggregatedSentiment:
+        """Get aggregated sentiment, using cache if available.
+
+        Args:
+            symbol: Stock ticker symbol
+            max_cache_age_minutes: Maximum age of cached data
+
+        Returns:
+            AggregatedSentiment object
+        """
+        # Try cache first
+        cached = self.get_cached_sentiment(symbol)
+
+        if cached:
+            # Check if cache is fresh enough
+            try:
+                cached_time = datetime.fromisoformat(cached.timestamp.replace("Z", "+00:00"))
+                age = datetime.now(timezone.utc) - cached_time
+                if age.total_seconds() < max_cache_age_minutes * 60:
+                    logger.debug("Using cached sentiment", symbol=symbol, age_seconds=age.total_seconds())
+                    return cached
+            except Exception:
+                pass
+
+        # Fetch fresh data
+        sentiment = await self.get_aggregated_sentiment(symbol, include_samples=True)
+
+        # Calculate velocity and momentum
+        velocity, momentum = self._calculate_velocity_and_momentum(sentiment)
+        sentiment.mention_velocity = velocity
+        sentiment.sentiment_momentum = momentum
+
+        # Cache the result
+        self.cache_sentiment(sentiment)
+
+        return sentiment
+
+    async def get_batch_sentiment(
+        self,
+        symbols: list[str],
+        use_cache: bool = True,
+    ) -> dict[str, AggregatedSentiment]:
+        """Get aggregated sentiment for multiple symbols.
+
+        Args:
+            symbols: List of ticker symbols
+            use_cache: Whether to use cached data
+
+        Returns:
+            Dictionary mapping symbol to AggregatedSentiment
+        """
+        results: dict[str, AggregatedSentiment] = {}
+
+        for symbol in symbols:
+            try:
+                if use_cache:
+                    sentiment = await self.get_aggregated_sentiment_with_cache(symbol)
+                else:
+                    sentiment = await self.get_aggregated_sentiment(symbol, include_samples=False)
+
+                results[symbol.upper()] = sentiment
+
+            except Exception as e:
+                logger.warning("Failed to get sentiment for symbol", symbol=symbol, error=str(e))
+
+        return results
 
 
 async def main():

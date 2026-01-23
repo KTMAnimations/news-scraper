@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
+import { WatchlistQuickView } from '@/components/watchlist/WatchlistQuickView';
 
 const secondaryNavigation = [
   { name: 'Settings', href: '/dashboard/settings', icon: Settings },
@@ -103,6 +104,24 @@ export function Sidebar() {
           <p className="text-2xs text-text-tertiary leading-relaxed">
             Receiving real-time events from 50+ sources with &lt;2s latency.
           </p>
+        </div>
+
+        {/* Watchlist Quick View */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between px-3">
+            <p className="text-2xs font-medium text-text-quaternary uppercase tracking-wider">
+              Watchlist
+            </p>
+            <Link
+              href="/dashboard/watchlist"
+              className="text-2xs text-accent hover:text-accent-hover transition-colors"
+            >
+              View All
+            </Link>
+          </div>
+          <div className="card rounded-xl p-3">
+            <WatchlistQuickView maxItems={4} compact />
+          </div>
         </div>
 
         {/* Today's Activity */}

@@ -5,12 +5,9 @@ import { useSession } from 'next-auth/react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import {
   User,
-  Mail,
   Bell,
   CreditCard,
   Shield,
-  Moon,
-  Sun,
   Check,
   ExternalLink,
   Crown,
@@ -19,6 +16,7 @@ import {
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { TIER_FEATURES, type SubscriptionTier } from '@/types/user';
+import { NotificationSettings } from '@/components/notifications/NotificationSettings';
 
 type SettingsTab = 'profile' | 'notifications' | 'billing' | 'security';
 
@@ -165,111 +163,7 @@ export default function SettingsPage() {
           )}
 
           {/* Notifications Tab */}
-          {activeTab === 'notifications' && (
-            <div className="card rounded-2xl p-6">
-              <h2 className="text-lg font-semibold text-text-primary mb-6">
-                Notification Preferences
-              </h2>
-
-              <div className="space-y-6">
-                {/* Email Notifications */}
-                <div>
-                  <h3 className="font-medium text-text-primary mb-4">
-                    Email Notifications
-                  </h3>
-                  <div className="space-y-4">
-                    {[
-                      {
-                        id: 'alerts',
-                        label: 'Alert Notifications',
-                        desc: 'Receive emails when your alerts are triggered',
-                      },
-                      {
-                        id: 'daily',
-                        label: 'Daily Digest',
-                        desc: 'Get a summary of high-alpha events each day',
-                      },
-                      {
-                        id: 'weekly',
-                        label: 'Weekly Report',
-                        desc: 'Comprehensive weekly market analysis',
-                      },
-                      {
-                        id: 'product',
-                        label: 'Product Updates',
-                        desc: 'Learn about new features and improvements',
-                      },
-                    ].map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-center justify-between p-4 bg-bg-secondary rounded-xl"
-                      >
-                        <div>
-                          <p className="font-medium text-text-primary">
-                            {item.label}
-                          </p>
-                          <p className="text-sm text-text-tertiary">
-                            {item.desc}
-                          </p>
-                        </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            defaultChecked={item.id !== 'product'}
-                            className="sr-only peer"
-                          />
-                          <div className="w-11 h-6 bg-bg-tertiary peer-focus:ring-2 peer-focus:ring-accent/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Push Notifications */}
-                <div className="pt-6 border-t border-border">
-                  <h3 className="font-medium text-text-primary mb-4">
-                    Push Notifications
-                  </h3>
-                  <div className="space-y-4">
-                    {[
-                      {
-                        id: 'realtime',
-                        label: 'Real-time Alerts',
-                        desc: 'Get instant push notifications for triggered alerts',
-                      },
-                      {
-                        id: 'highalpha',
-                        label: 'High Alpha Signals',
-                        desc: 'Notifications for signals with alpha score > 80',
-                      },
-                    ].map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-center justify-between p-4 bg-bg-secondary rounded-xl"
-                      >
-                        <div>
-                          <p className="font-medium text-text-primary">
-                            {item.label}
-                          </p>
-                          <p className="text-sm text-text-tertiary">
-                            {item.desc}
-                          </p>
-                        </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            defaultChecked
-                            className="sr-only peer"
-                          />
-                          <div className="w-11 h-6 bg-bg-tertiary peer-focus:ring-2 peer-focus:ring-accent/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          {activeTab === 'notifications' && <NotificationSettings />}
 
           {/* Billing Tab */}
           {activeTab === 'billing' && (

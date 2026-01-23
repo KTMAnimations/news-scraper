@@ -271,4 +271,23 @@ def get_settings() -> Settings:
     return Settings()
 
 
+def validate_and_get_settings() -> Settings:
+    """Get settings with secrets validation on startup.
+
+    This function validates all secrets before returning settings.
+    In production, it will exit if critical secrets are missing.
+
+    Returns:
+        Validated Settings instance
+    """
+    from backend.core.secrets import validate_secrets_on_startup
+
+    _settings = get_settings()
+
+    # Validate secrets (will exit in production if critical failures)
+    validate_secrets_on_startup(_settings, exit_on_failure=True)
+
+    return _settings
+
+
 settings = get_settings()

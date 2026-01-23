@@ -19,6 +19,7 @@ import { cn, formatRelativeTime, formatDateTime } from '@/lib/utils';
 import { EventCard } from '@/components/events/EventCard';
 import { SentimentBadge } from '@/components/events/SentimentBadge';
 import { TradingViewChart } from '@/components/charts/TradingViewChart';
+import { TickerStatsPanel, PriceDisplay, RelatedTickers } from '@/components/ticker';
 import type { Event } from '@/types/events';
 
 // Simple sentiment chart component using div bars
@@ -271,148 +272,166 @@ export default function TickerDetailPage() {
         </div>
       </div>
 
-      {/* TradingView Chart */}
-      <div className="card rounded-2xl p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-text-primary">
-            {ticker} Price Chart
-          </h2>
-          <a
-            href={`https://www.tradingview.com/symbols/${ticker}/`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-xs text-text-tertiary hover:text-accent transition-colors"
-          >
-            <span>Open in TradingView</span>
-            <ExternalLink className="h-3 w-3" />
-          </a>
-        </div>
-        <TradingViewChart symbol={ticker} theme="dark" height={500} interval="D" />
-      </div>
+      {/* Main Content Grid: Chart + Sidebar */}
+      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+        {/* Left Column: Chart */}
+        <div className="xl:col-span-3 space-y-6">
+          {/* TradingView Chart */}
+          <div className="card rounded-2xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-text-primary">
+                {ticker} Price Chart
+              </h2>
+              <a
+                href={`https://www.tradingview.com/symbols/${ticker}/`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-xs text-text-tertiary hover:text-accent transition-colors"
+              >
+                <span>Open in TradingView</span>
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            </div>
+            <TradingViewChart symbol={ticker} theme="dark" height={500} interval="D" />
+          </div>
 
-      {/* Chart & Sentiment Overview */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Sentiment Chart */}
-        <div className="card rounded-2xl p-5">
-          <h2 className="text-lg font-semibold text-text-primary mb-5">
-            Event Activity (Last 24h)
-          </h2>
-          <SentimentChart events={events} />
-          <div className="flex items-center justify-center gap-6 mt-5">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-sm bg-positive" />
-              <span className="text-xs text-text-tertiary">Positive</span>
+          {/* Chart & Sentiment Overview */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Sentiment Chart */}
+            <div className="card rounded-2xl p-5">
+              <h2 className="text-lg font-semibold text-text-primary mb-5">
+                Event Activity (Last 24h)
+              </h2>
+              <SentimentChart events={events} />
+              <div className="flex items-center justify-center gap-6 mt-5">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-sm bg-positive" />
+                  <span className="text-xs text-text-tertiary">Positive</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-sm bg-negative" />
+                  <span className="text-xs text-text-tertiary">Negative</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-sm bg-bg-tertiary" />
+                  <span className="text-xs text-text-tertiary">Neutral</span>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-sm bg-negative" />
-              <span className="text-xs text-text-tertiary">Negative</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-sm bg-bg-tertiary" />
-              <span className="text-xs text-text-tertiary">Neutral</span>
+
+            {/* Sentiment Breakdown */}
+            <div className="card rounded-2xl p-5">
+              <h2 className="text-lg font-semibold text-text-primary mb-5">
+                Sentiment Analysis
+              </h2>
+
+              <div className="space-y-4">
+                {/* Sentiment Bar */}
+                <div>
+                  <div className="flex items-center justify-between text-sm mb-2">
+                    <span className="text-text-secondary">Overall Sentiment</span>
+                    <span
+                      className={cn(
+                        'font-medium',
+                        (sentimentData?.avg_sentiment || 0) > 0.2
+                          ? 'text-positive'
+                          : (sentimentData?.avg_sentiment || 0) < -0.2
+                          ? 'text-negative'
+                          : 'text-text-tertiary'
+                      )}
+                    >
+                      {(sentimentData?.avg_sentiment || 0) > 0.2
+                        ? 'Bullish'
+                        : (sentimentData?.avg_sentiment || 0) < -0.2
+                        ? 'Bearish'
+                        : 'Neutral'}
+                    </span>
+                  </div>
+                  <div className="h-3 bg-bg-tertiary rounded-full overflow-hidden">
+                    <div
+                      className={cn(
+                        'h-full transition-all',
+                        (sentimentData?.avg_sentiment || 0) > 0
+                          ? 'bg-positive'
+                          : 'bg-negative'
+                      )}
+                      style={{
+                        width: `${50 + (sentimentData?.avg_sentiment || 0) * 50}%`,
+                      }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-2xs text-text-quaternary mt-1">
+                    <span>Bearish</span>
+                    <span>Bullish</span>
+                  </div>
+                </div>
+
+                {/* Event Type Distribution */}
+                <div className="pt-4 border-t border-border">
+                  <p className="text-sm text-text-secondary mb-3">Event Types</p>
+                  <div className="space-y-2">
+                    {Object.entries(
+                      events.reduce(
+                        (acc, e) => {
+                          acc[e.event_type] = (acc[e.event_type] || 0) + 1;
+                          return acc;
+                        },
+                        {} as Record<string, number>
+                      )
+                    )
+                      .sort((a, b) => b[1] - a[1])
+                      .slice(0, 5)
+                      .map(([type, count]) => (
+                        <div key={type} className="flex items-center justify-between">
+                          <span className="text-sm text-text-tertiary">
+                            {type.replace(/_/g, ' ')}
+                          </span>
+                          <span className="font-mono text-sm text-text-primary">
+                            {count}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+
+                {/* Trend Indicator */}
+                <div className="pt-4 border-t border-border">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-text-secondary">Sentiment Trend</span>
+                    <span
+                      className={cn(
+                        'flex items-center gap-1.5 text-sm font-medium px-2.5 py-1 rounded-lg',
+                        sentimentData?.sentiment_trend === 'improving'
+                          ? 'bg-positive-subtle text-positive'
+                          : sentimentData?.sentiment_trend === 'declining'
+                          ? 'bg-negative-subtle text-negative'
+                          : 'bg-bg-tertiary text-text-tertiary'
+                      )}
+                    >
+                      {sentimentData?.sentiment_trend === 'improving' ? (
+                        <TrendingUp className="h-3.5 w-3.5" />
+                      ) : sentimentData?.sentiment_trend === 'declining' ? (
+                        <TrendingDown className="h-3.5 w-3.5" />
+                      ) : null}
+                      {sentimentData?.sentiment_trend || 'Stable'}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Sentiment Breakdown */}
-        <div className="card rounded-2xl p-5">
-          <h2 className="text-lg font-semibold text-text-primary mb-5">
-            Sentiment Analysis
-          </h2>
+        {/* Right Sidebar: Price, Stats, Related Tickers */}
+        <div className="xl:col-span-1 space-y-6">
+          {/* Price Display */}
+          <PriceDisplay ticker={ticker} />
 
-          <div className="space-y-4">
-            {/* Sentiment Bar */}
-            <div>
-              <div className="flex items-center justify-between text-sm mb-2">
-                <span className="text-text-secondary">Overall Sentiment</span>
-                <span
-                  className={cn(
-                    'font-medium',
-                    (sentimentData?.avg_sentiment || 0) > 0.2
-                      ? 'text-positive'
-                      : (sentimentData?.avg_sentiment || 0) < -0.2
-                      ? 'text-negative'
-                      : 'text-text-tertiary'
-                  )}
-                >
-                  {(sentimentData?.avg_sentiment || 0) > 0.2
-                    ? 'Bullish'
-                    : (sentimentData?.avg_sentiment || 0) < -0.2
-                    ? 'Bearish'
-                    : 'Neutral'}
-                </span>
-              </div>
-              <div className="h-3 bg-bg-tertiary rounded-full overflow-hidden">
-                <div
-                  className={cn(
-                    'h-full transition-all',
-                    (sentimentData?.avg_sentiment || 0) > 0
-                      ? 'bg-positive'
-                      : 'bg-negative'
-                  )}
-                  style={{
-                    width: `${50 + (sentimentData?.avg_sentiment || 0) * 50}%`,
-                  }}
-                />
-              </div>
-              <div className="flex justify-between text-2xs text-text-quaternary mt-1">
-                <span>Bearish</span>
-                <span>Bullish</span>
-              </div>
-            </div>
+          {/* Statistics Panel */}
+          <TickerStatsPanel ticker={ticker} timeRange={timeRange} />
 
-            {/* Event Type Distribution */}
-            <div className="pt-4 border-t border-border">
-              <p className="text-sm text-text-secondary mb-3">Event Types</p>
-              <div className="space-y-2">
-                {Object.entries(
-                  events.reduce(
-                    (acc, e) => {
-                      acc[e.event_type] = (acc[e.event_type] || 0) + 1;
-                      return acc;
-                    },
-                    {} as Record<string, number>
-                  )
-                )
-                  .sort((a, b) => b[1] - a[1])
-                  .slice(0, 5)
-                  .map(([type, count]) => (
-                    <div key={type} className="flex items-center justify-between">
-                      <span className="text-sm text-text-tertiary">
-                        {type.replace(/_/g, ' ')}
-                      </span>
-                      <span className="font-mono text-sm text-text-primary">
-                        {count}
-                      </span>
-                    </div>
-                  ))}
-              </div>
-            </div>
-
-            {/* Trend Indicator */}
-            <div className="pt-4 border-t border-border">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-text-secondary">Sentiment Trend</span>
-                <span
-                  className={cn(
-                    'flex items-center gap-1.5 text-sm font-medium px-2.5 py-1 rounded-lg',
-                    sentimentData?.sentiment_trend === 'improving'
-                      ? 'bg-positive-subtle text-positive'
-                      : sentimentData?.sentiment_trend === 'declining'
-                      ? 'bg-negative-subtle text-negative'
-                      : 'bg-bg-tertiary text-text-tertiary'
-                  )}
-                >
-                  {sentimentData?.sentiment_trend === 'improving' ? (
-                    <TrendingUp className="h-3.5 w-3.5" />
-                  ) : sentimentData?.sentiment_trend === 'declining' ? (
-                    <TrendingDown className="h-3.5 w-3.5" />
-                  ) : null}
-                  {sentimentData?.sentiment_trend || 'Stable'}
-                </span>
-              </div>
-            </div>
-          </div>
+          {/* Related Tickers */}
+          <RelatedTickers ticker={ticker} limit={8} />
         </div>
       </div>
 

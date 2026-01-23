@@ -24,12 +24,13 @@ class OpenSearchClient:
             "number_of_shards": 1,
             "number_of_replicas": 0,
             "analysis": {
-                "analyzer": {
-                    "headline_analyzer": {
+                "normalizer": {
+                    "uppercase": {
                         "type": "custom",
-                        "tokenizer": "standard",
-                        "filter": ["lowercase", "asciifolding", "porter_stem"],
-                    },
+                        "filter": ["uppercase"],
+                    }
+                },
+                "analyzer": {
                     "ticker_analyzer": {
                         "type": "custom",
                         "tokenizer": "keyword",
@@ -44,7 +45,7 @@ class OpenSearchClient:
                 "ticker": {"type": "keyword", "normalizer": "uppercase"},
                 "headline": {
                     "type": "text",
-                    "analyzer": "headline_analyzer",
+                    "analyzer": "english",
                     "fields": {
                         "keyword": {"type": "keyword"},
                         "suggest": {
@@ -53,7 +54,7 @@ class OpenSearchClient:
                         },
                     },
                 },
-                "summary": {"type": "text", "analyzer": "headline_analyzer"},
+                "summary": {"type": "text"},
                 "content": {"type": "text"},
                 "event_type": {"type": "keyword"},
                 "event_category": {"type": "keyword"},
@@ -230,14 +231,22 @@ class OpenSearchClient:
         filters: dict[str, Any] | None = None,
         limit: int = 50,
         offset: int = 0,
+        sort: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         """Full-text search for events.
 
         Args:
             query: Search query string
-            filters: Optional filters (ticker, event_type, direction, min_alpha)
+            filters: Optional filters:
+                - ticker: Filter by ticker symbol
+                - event_type: Filter by event type
+                - direction: Filter by direction
+                - min_alpha: Minimum alpha score
+                - start_date: Events after this date (datetime or ISO string)
+                - end_date: Events before this date (datetime or ISO string)
             limit: Maximum results
             offset: Pagination offset
+            sort: Sort configuration (list of {field: order} dicts)
 
         Returns:
             Search results with total count
@@ -245,17 +254,19 @@ class OpenSearchClient:
         try:
             client = self._get_client()
 
-            must_clauses = [
-                {
+            # Build must clauses for full-text search
+            must_clauses = []
+            if query:
+                must_clauses.append({
                     "multi_match": {
                         "query": query,
                         "fields": ["headline^3", "summary^2", "content", "extracted_companies"],
                         "type": "best_fields",
                         "fuzziness": "AUTO",
                     }
-                }
-            ]
+                })
 
+            # Build filter clauses
             filter_clauses = []
             if filters:
                 if filters.get("ticker"):
@@ -267,17 +278,40 @@ class OpenSearchClient:
                 if filters.get("min_alpha") is not None:
                     filter_clauses.append({"range": {"alpha_score": {"gte": filters["min_alpha"]}}})
 
+                # Date range filtering
+                date_range = {}
+                if filters.get("start_date"):
+                    start = filters["start_date"]
+                    if hasattr(start, "isoformat"):
+                        start = start.isoformat()
+                    date_range["gte"] = start
+                if filters.get("end_date"):
+                    end = filters["end_date"]
+                    if hasattr(end, "isoformat"):
+                        end = end.isoformat()
+                    date_range["lte"] = end
+                if date_range:
+                    filter_clauses.append({"range": {"event_time": date_range}})
+
+            # Build query body
+            query_body: dict[str, Any] = {
+                "bool": {}
+            }
+            if must_clauses:
+                query_body["bool"]["must"] = must_clauses
+            else:
+                # If no query, match all documents
+                query_body["bool"]["must"] = [{"match_all": {}}]
+            if filter_clauses:
+                query_body["bool"]["filter"] = filter_clauses
+
+            # Default sort if not provided
+            if sort is None:
+                sort = [{"_score": "desc"}, {"event_time": "desc"}]
+
             body = {
-                "query": {
-                    "bool": {
-                        "must": must_clauses,
-                        "filter": filter_clauses,
-                    }
-                },
-                "sort": [
-                    {"_score": "desc"},
-                    {"event_time": "desc"},
-                ],
+                "query": query_body,
+                "sort": sort,
                 "from": offset,
                 "size": limit,
                 "highlight": {

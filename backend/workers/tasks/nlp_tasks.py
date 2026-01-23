@@ -210,24 +210,33 @@ def analyze_sentiment_task(self, data: dict[str, Any]) -> dict[str, Any]:
 
 
 @celery_app.task
-def batch_analyze_sentiment(texts: list[str]) -> list[dict[str, Any]]:
+def batch_analyze_sentiment(texts: list[str], batch_size: int = 16) -> list[dict[str, Any]]:
     """Batch sentiment analysis for multiple texts.
+
+    Efficiently processes multiple texts using batch inference to reduce
+    model loading overhead and improve GPU utilization.
 
     Args:
         texts: List of texts to analyze
+        batch_size: Number of texts to process per batch (default 16)
 
     Returns:
         List of sentiment results
     """
     try:
-        from backend.processing.sentiment import get_sentiment_service
-
-        service = get_sentiment_service(use_finbert=True)
+        # Use cached service for efficiency
+        service = get_cached_sentiment_service()
 
         if hasattr(service, "analyze_batch"):
-            results = service.analyze_batch(texts)
+            results = service.analyze_batch(texts, batch_size=batch_size)
         else:
             results = [service.analyze(text) for text in texts]
+
+        logger.info(
+            "Batch sentiment analysis complete",
+            count=len(texts),
+            batch_size=batch_size,
+        )
 
         return [
             {
@@ -247,18 +256,123 @@ def batch_analyze_sentiment(texts: list[str]) -> list[dict[str, Any]]:
         ]
 
 
+@celery_app.task
+def batch_process_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Process multiple events through the NLP pipeline in batch.
+
+    Extracts entities, analyzes sentiment, and classifies events efficiently.
+
+    Args:
+        events: List of event data dictionaries
+
+    Returns:
+        List of enriched event data
+    """
+    try:
+        from backend.processing.ner import EntityExtractor
+        from backend.processing.classification import EventClassifier, IndustryClassifier
+
+        extractor = EntityExtractor(use_spacy=False)
+        event_classifier = EventClassifier()
+        industry_classifier = IndustryClassifier()
+
+        # Extract text for sentiment batch processing
+        texts_for_sentiment = []
+        for event in events:
+            text = event.get("headline", "") or event.get("title", "")
+            if not text:
+                text = event.get("summary", "") or event.get("content", "")[:500]
+            texts_for_sentiment.append(text or "")
+
+        # Batch sentiment analysis
+        service = get_cached_sentiment_service()
+        sentiment_results = service.analyze_batch(texts_for_sentiment)
+
+        # Process each event
+        enriched_events = []
+        for i, event in enumerate(events):
+            # Get text for processing
+            text = ""
+            if "headline" in event:
+                text = event["headline"]
+            if "title" in event:
+                text = event.get("title", "") + " " + text
+            if "content" in event:
+                text = text + " " + event.get("content", "")[:2000]
+            if "summary" in event:
+                text = text + " " + event.get("summary", "")
+
+            text = text.strip()
+
+            if text:
+                # Extract entities
+                entities = extractor.extract(text)
+                event["extracted_tickers"] = entities.tickers
+                event["extracted_companies"] = entities.companies
+                event["extracted_people"] = entities.people
+                event["extracted_amounts"] = entities.money
+                event["ticker_confidences"] = entities.ticker_confidences
+
+                # Set primary ticker if not already set
+                if not event.get("ticker") and entities.tickers:
+                    event["ticker"] = entities.tickers[0]
+
+                # Classify event
+                classification = event_classifier.classify(text, event.get("source"))
+                event["event_type"] = classification.event_type.value
+                event["event_confidence"] = classification.confidence
+                event["is_material"] = classification.is_material
+                event["base_signal_weight"] = classification.base_signal_weight
+
+                # Industry classification
+                industry = industry_classifier.classify(
+                    ticker=event.get("ticker"),
+                    text=text,
+                )
+                event["sector"] = industry.sector.value
+                event["sector_name"] = industry.sector_name
+                event["industry_confidence"] = industry.confidence
+
+            # Apply sentiment from batch results
+            sentiment = sentiment_results[i]
+            event["sentiment_label"] = sentiment.label
+            event["sentiment_score"] = sentiment.score
+            event["sentiment_confidence"] = sentiment.confidence
+            event["sentiment_probabilities"] = sentiment.probabilities
+
+            enriched_events.append(event)
+
+        logger.info(
+            "Batch event processing complete",
+            count=len(events),
+        )
+
+        return enriched_events
+
+    except Exception as e:
+        logger.error("Batch event processing failed", error=str(e))
+        raise
+
+
 @celery_app.task(bind=True, max_retries=2)
 def classify_event_task(self, data: dict[str, Any]) -> dict[str, Any]:
-    """Classify event type from content.
+    """Classify event type from content using ML classifier with fallback.
+
+    Uses ML-based classification when available, with rule-based fallback.
+    Also classifies into sub-categories for detailed event analysis.
 
     Args:
         data: Event data
 
     Returns:
-        Data enriched with classification
+        Data enriched with classification and sub-category
     """
     try:
-        from backend.processing.classification import EventClassifier
+        from backend.processing.classification import (
+            EventClassifier,
+            get_ml_classifier,
+            SubCategoryClassifier,
+        )
 
         # Get text for classification
         text = data.get("headline", "") or data.get("title", "")
@@ -267,20 +381,36 @@ def classify_event_task(self, data: dict[str, Any]) -> dict[str, Any]:
         if not text.strip():
             return data
 
-        # Classify
-        classifier = EventClassifier()
-        classification = classifier.classify(text, data.get("source"))
+        # Use ML classifier (with rule-based fallback)
+        ml_classifier = get_ml_classifier(use_ml=True)
+        classification = ml_classifier.classify(text, data.get("source"))
 
-        # Enrich data
+        # Enrich data with main classification
         data["event_type"] = classification.event_type.value
         data["event_confidence"] = classification.confidence
-        data["is_material"] = classification.is_material
-        data["base_signal_weight"] = classification.base_signal_weight
+        data["classification_used_ml"] = classification.used_ml
+
+        # Get rule-based classification for additional fields (material, signal weight)
+        rule_classifier = EventClassifier()
+        rule_result = rule_classifier.classify(text, data.get("source"))
+
+        data["is_material"] = rule_result.is_material
+        data["base_signal_weight"] = rule_result.base_signal_weight
+
+        # Classify sub-category for detailed analysis
+        sub_classifier = SubCategoryClassifier()
+        sub_result = sub_classifier.classify(text, classification.event_type)
+
+        data["event_sub_category"] = sub_result.sub_category
+        data["sub_category_confidence"] = sub_result.confidence
+        data["sub_category_details"] = sub_result.details
 
         logger.debug(
             "Event classified",
             event_type=classification.event_type.value,
+            sub_category=sub_result.sub_category,
             confidence=classification.confidence,
+            used_ml=classification.used_ml,
         )
 
         return data

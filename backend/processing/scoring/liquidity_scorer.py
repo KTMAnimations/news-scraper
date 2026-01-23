@@ -48,10 +48,27 @@ class LiquidityScorer:
         "otc": 1.4,           # Maximum inefficiency
     }
 
-    def __init__(self):
-        """Initialize liquidity scorer."""
+    def __init__(self, use_market_data_service: bool = True):
+        """Initialize liquidity scorer.
+
+        Args:
+            use_market_data_service: Whether to fetch live market data
+        """
         # Cache for ticker liquidity data
         self._cache: dict[str, dict[str, Any]] = {}
+        self._use_market_data = use_market_data_service
+        self._market_data_service = None
+
+    def _get_market_data_service(self):
+        """Lazy load market data service."""
+        if self._market_data_service is None and self._use_market_data:
+            try:
+                from .market_data_service import get_market_data_service
+                self._market_data_service = get_market_data_service()
+            except ImportError:
+                logger.warning("Market data service not available")
+                self._use_market_data = False
+        return self._market_data_service
 
     def score(
         self,
@@ -60,22 +77,49 @@ class LiquidityScorer:
         avg_volume: float | None = None,
         is_otc: bool = False,
         price: float | None = None,
+        fetch_market_data: bool = True,
     ) -> dict[str, Any]:
         """Score liquidity and return alpha multiplier.
 
         Args:
-            ticker: Stock ticker (for cache lookup)
-            market_cap: Market capitalization in USD
-            avg_volume: Average daily volume in shares
+            ticker: Stock ticker (for cache lookup and market data fetch)
+            market_cap: Market capitalization in USD (optional, will be fetched if ticker provided)
+            avg_volume: Average daily volume in shares (optional, will be fetched if ticker provided)
             is_otc: Whether stock trades OTC
-            price: Current stock price
+            price: Current stock price (optional, will be fetched if ticker provided)
+            fetch_market_data: Whether to fetch market data if not provided
 
         Returns:
             Liquidity scoring information
         """
         # Check cache
-        if ticker and ticker in self._cache:
-            return self._cache[ticker]
+        if ticker and ticker.upper() in self._cache:
+            return self._cache[ticker.upper()]
+
+        # Fetch market data if ticker provided and data not supplied
+        fetched_data = None
+        if ticker and fetch_market_data and (market_cap is None or avg_volume is None):
+            service = self._get_market_data_service()
+            if service:
+                try:
+                    fetched_data = service.get_market_data(ticker)
+                    if fetched_data:
+                        market_cap = market_cap or fetched_data.market_cap
+                        avg_volume = avg_volume or fetched_data.avg_volume
+                        price = price or fetched_data.price
+                        is_otc = is_otc or fetched_data.is_otc
+                        logger.debug(
+                            "Fetched market data for liquidity scoring",
+                            ticker=ticker,
+                            market_cap=market_cap,
+                            avg_volume=avg_volume,
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to fetch market data",
+                        ticker=ticker,
+                        error=str(e),
+                    )
 
         # Determine category
         category = self._categorize(
@@ -104,14 +148,32 @@ class LiquidityScorer:
             "market_cap": market_cap,
             "avg_volume": avg_volume,
             "is_otc": is_otc,
+            "price": price,
             "confidence": min(1.0, confidence),
+            "data_source": "fetched" if fetched_data else "provided",
         }
 
         # Cache result
         if ticker:
-            self._cache[ticker] = result
+            self._cache[ticker.upper()] = result
 
         return result
+
+    def score_with_market_data(
+        self,
+        ticker: str,
+    ) -> dict[str, Any]:
+        """Score liquidity with automatic market data lookup.
+
+        Convenience method that always fetches market data.
+
+        Args:
+            ticker: Stock ticker symbol
+
+        Returns:
+            Liquidity scoring information
+        """
+        return self.score(ticker=ticker, fetch_market_data=True)
 
     def _categorize(
         self,

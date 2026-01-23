@@ -14,6 +14,18 @@ from backend.config import settings
 
 logger = structlog.get_logger(__name__)
 
+# Import paywall detector (lazy import to avoid circular imports)
+_paywall_detector = None
+
+
+def get_paywall_detector():
+    """Get or create paywall detector instance."""
+    global _paywall_detector
+    if _paywall_detector is None:
+        from .paywall_detector import PaywallDetector
+        _paywall_detector = PaywallDetector()
+    return _paywall_detector
+
 
 class BaseScraper(ABC):
     """Abstract base class for all scrapers."""
@@ -176,6 +188,14 @@ class BaseScraper(ABC):
         Returns:
             Normalized event dictionary
         """
+        metadata = raw_data.get("metadata", {})
+
+        # Include paywall information if present
+        if "paywall" in raw_data:
+            metadata["paywall"] = raw_data["paywall"]
+            metadata["is_partial_content"] = raw_data.get("is_partial_content", False)
+            metadata["content_completeness"] = raw_data.get("content_completeness", "full")
+
         return {
             "ticker": raw_data.get("ticker", ""),
             "event_type": raw_data.get("event_type", "NEWS"),
@@ -187,5 +207,43 @@ class BaseScraper(ABC):
             "source_name": raw_data.get("source", self.__class__.__name__),
             "event_time": raw_data.get("published_at", datetime.now(timezone.utc).isoformat()),
             "ingested_at": datetime.now(timezone.utc).isoformat(),
-            "metadata": raw_data.get("metadata", {}),
+            "metadata": metadata,
         }
+
+    async def fetch_with_paywall_detection(
+        self,
+        url: str,
+        expected_length: int | None = None,
+        **kwargs,
+    ) -> tuple[httpx.Response, Any]:
+        """Fetch URL and detect paywall status.
+
+        Args:
+            url: URL to fetch
+            expected_length: Expected content length (for truncation detection)
+            **kwargs: Additional arguments for httpx
+
+        Returns:
+            Tuple of (HTTP response, PaywallResult)
+        """
+        from .paywall_detector import PaywallResult
+
+        response = await self.fetch(url, **kwargs)
+
+        # Detect paywall
+        detector = get_paywall_detector()
+        paywall_result = detector.detect(
+            html=response.text,
+            url=url,
+            expected_length=expected_length,
+        )
+
+        if paywall_result.is_paywalled:
+            logger.info(
+                "Paywall detected",
+                url=url,
+                paywall_type=paywall_result.paywall_type.value,
+                confidence=paywall_result.confidence,
+            )
+
+        return response, paywall_result

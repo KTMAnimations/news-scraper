@@ -46,12 +46,24 @@ services:
       - OPENSEARCH_URL=http://opensearch:9200
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - KAFKA_BROKERS=redpanda:9092
+      - PGHOST=postgres
+      - PGPORT=5432
+      - PGUSER=newsuser
+      - PGPASSWORD=newspass
+      - PGDATABASE=newsdb
+      - BACKUP_DIR=/backups
+      - BACKUP_RETENTION_DAYS=7
     volumes:
       - ./backend:/app/backend
+      - ./scripts:/app/scripts:ro
+      - db-backups:/backups
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      redpanda:
         condition: service_healthy
     networks:
       - news-scraper-network
@@ -76,6 +88,35 @@ services:
         condition: service_healthy
     networks:
       - news-scraper-network
+
+  # Flower - Celery Monitoring
+  flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A backend.workers.celery_app flower --port=5555 --broker=redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - FLOWER_BASIC_AUTH=admin:admin
+      - FLOWER_PERSISTENT=true
+      - FLOWER_DB=/data/flower.db
+    volumes:
+      - ./backend:/app/backend
+      - flower-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - news-scraper-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5555/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   # NLP Service (FinBERT)
   nlp-service:
@@ -257,6 +298,52 @@ services:
     profiles:
       - debug
 
+  # Redpanda to WebSocket Bridge Consumer
+  # Consumes events from Redpanda and broadcasts to WebSocket via Redis
+  redpanda-consumer:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: python -m backend.services.redpanda_consumer
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - KAFKA_BROKERS=redpanda:9092
+    volumes:
+      - ./backend:/app/backend
+    depends_on:
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    networks:
+      - news-scraper-network
+    restart: unless-stopped
+
+  # Database Backup Service
+  # Runs pg_dump backups on a schedule via the Celery worker
+  # Can also be triggered manually: docker-compose run --rm db-backup
+  db-backup:
+    image: timescale/timescaledb:latest-pg15
+    environment:
+      - PGHOST=postgres
+      - PGPORT=5432
+      - PGUSER=newsuser
+      - PGPASSWORD=newspass
+      - PGDATABASE=newsdb
+      - BACKUP_DIR=/backups
+      - BACKUP_RETENTION_DAYS=7
+    volumes:
+      - ./scripts/backup-db.sh:/usr/local/bin/backup-db.sh:ro
+      - db-backups:/backups
+    entrypoint: ["/usr/local/bin/backup-db.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - news-scraper-network
+    profiles:
+      - backup
+
 networks:
   news-scraper-network:
     driver: bridge
@@ -267,3 +354,5 @@ volumes:
   opensearch-data:
   redpanda-data:
   model-cache:
+  flower-data:
+  db-backups:

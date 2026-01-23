@@ -1,0 +1,16 @@
+# Robots.txt for Micro-Alpha
+# https://www.robotstxt.org/robotstxt.html
+
+User-agent: *
+Allow: /
+
+# Disallow private areas
+Disallow: /api/
+Disallow: /dashboard/settings
+Disallow: /auth/
+
+# Crawl delay to be polite
+Crawl-delay: 1
+
+# Sitemap location
+Sitemap: https://micro-alpha.com/sitemap.xml

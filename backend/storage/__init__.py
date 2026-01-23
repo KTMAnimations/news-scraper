@@ -18,6 +18,7 @@ from backend.storage.timescale.queries import (
     WatchlistQueries,
 )
 from backend.storage.opensearch.client import OpenSearchClient, opensearch_client
+from backend.storage.opensearch.search_service import SearchService, search_service
 
 __all__ = [
     # Connection
@@ -39,4 +40,6 @@ __all__ = [
     # OpenSearch
     "OpenSearchClient",
     "opensearch_client",
+    "SearchService",
+    "search_service",
 ]

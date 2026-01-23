@@ -18,6 +18,7 @@ import {
   formatDateTime,
 } from '@/lib/utils';
 import { SentimentBadge } from './SentimentBadge';
+import { WatchlistButton } from '@/components/watchlist/WatchlistButton';
 
 interface EventCardProps {
   event: Event;
@@ -70,6 +71,9 @@ export function EventCard({ event, compact = false }: EventCardProps) {
             >
               {event.ticker}
             </Link>
+
+            {/* Watchlist button */}
+            <WatchlistButton ticker={event.ticker} variant="compact" showLabel />
 
             {/* Event type badge */}
             <span className="badge badge-neutral">

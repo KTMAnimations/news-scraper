@@ -1,0 +1,154 @@
+# Alertmanager Configuration for News Scraper
+global:
+  # Global SMTP settings for email notifications
+  smtp_smarthost: 'smtp.example.com:587'
+  smtp_from: 'alerts@news-scraper.com'
+  smtp_auth_username: 'alerts@news-scraper.com'
+  smtp_auth_password: '${SMTP_PASSWORD}'
+  smtp_require_tls: true
+
+  # Slack webhook URL (optional)
+  slack_api_url: '${SLACK_WEBHOOK_URL}'
+
+  # Default resolve timeout
+  resolve_timeout: 5m
+
+# Routing tree for alerts
+route:
+  # Default receiver
+  receiver: 'default-receiver'
+
+  # Group alerts by these labels
+  group_by: ['alertname', 'severity', 'component']
+
+  # Wait before sending initial notification
+  group_wait: 30s
+
+  # Wait before sending updated notification for same group
+  group_interval: 5m
+
+  # Wait before resending same alert
+  repeat_interval: 4h
+
+  # Child routes for specific alert types
+  routes:
+    # Critical alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: 'critical-receiver'
+      group_wait: 10s
+      repeat_interval: 1h
+
+    # Warning alerts
+    - match:
+        severity: warning
+      receiver: 'warning-receiver'
+      repeat_interval: 4h
+
+    # Database alerts - separate channel
+    - match:
+        component: database
+      receiver: 'database-receiver'
+
+    # Scraper alerts
+    - match:
+        component: scraper
+      receiver: 'scraper-receiver'
+      repeat_interval: 2h
+
+# Inhibition rules to prevent duplicate alerts
+inhibit_rules:
+  # If a critical alert fires, inhibit warnings for same alertname
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'component']
+
+  # If service is down, inhibit other alerts for that service
+  - source_match:
+      alertname: 'APIServiceDown'
+    target_match_re:
+      alertname: 'High.*'
+    equal: ['service']
+
+# Receivers define notification channels
+receivers:
+  - name: 'default-receiver'
+    email_configs:
+      - to: 'team@example.com'
+        send_resolved: true
+        headers:
+          subject: '[News Scraper] {{ .Status | toUpper }}: {{ .CommonLabels.alertname }}'
+        html: |
+          {{ range .Alerts }}
+          <h3>{{ .Labels.alertname }}</h3>
+          <p><strong>Severity:</strong> {{ .Labels.severity }}</p>
+          <p><strong>Component:</strong> {{ .Labels.component }}</p>
+          <p><strong>Summary:</strong> {{ .Annotations.summary }}</p>
+          <p><strong>Description:</strong> {{ .Annotations.description }}</p>
+          <p><strong>Started:</strong> {{ .StartsAt }}</p>
+          {{ if .EndsAt }}<p><strong>Resolved:</strong> {{ .EndsAt }}</p>{{ end }}
+          <hr>
+          {{ end }}
+
+  - name: 'critical-receiver'
+    email_configs:
+      - to: 'oncall@example.com'
+        send_resolved: true
+        headers:
+          subject: '[CRITICAL] News Scraper: {{ .CommonLabels.alertname }}'
+    slack_configs:
+      - channel: '#alerts-critical'
+        send_resolved: true
+        title: '{{ .CommonLabels.alertname }}'
+        text: |
+          *Severity:* {{ .CommonLabels.severity }}
+          *Component:* {{ .CommonLabels.component }}
+          {{ range .Alerts }}
+          *Summary:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ end }}
+        color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+
+  - name: 'warning-receiver'
+    email_configs:
+      - to: 'team@example.com'
+        send_resolved: true
+        headers:
+          subject: '[WARNING] News Scraper: {{ .CommonLabels.alertname }}'
+    slack_configs:
+      - channel: '#alerts-warning'
+        send_resolved: true
+        title: '{{ .CommonLabels.alertname }}'
+        text: |
+          *Severity:* {{ .CommonLabels.severity }}
+          {{ range .Alerts }}
+          *Summary:* {{ .Annotations.summary }}
+          {{ end }}
+        color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
+
+  - name: 'database-receiver'
+    email_configs:
+      - to: 'dba@example.com'
+        send_resolved: true
+        headers:
+          subject: '[Database] News Scraper: {{ .CommonLabels.alertname }}'
+    slack_configs:
+      - channel: '#alerts-database'
+        send_resolved: true
+
+  - name: 'scraper-receiver'
+    slack_configs:
+      - channel: '#alerts-scrapers'
+        send_resolved: true
+        title: 'Scraper Alert: {{ .CommonLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Scraper:* {{ .Labels.scraper }}
+          *Summary:* {{ .Annotations.summary }}
+          {{ end }}
+
+# Templates for notifications (optional)
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'

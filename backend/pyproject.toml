@@ -31,9 +31,11 @@ dependencies = [
 
     # Kafka (Redpanda compatible)
     "aiokafka>=0.10.0",
+    "kafka-python>=2.0.2",
 
     # Celery
     "celery>=5.3.6",
+    "flower>=2.0.1",
 
     # Auth
     "python-jose[cryptography]>=3.3.0",
@@ -65,6 +67,9 @@ dependencies = [
 
     # Firebase for push notifications
     "firebase-admin>=6.4.0",
+
+    # Rate limiting
+    "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]
@@ -72,9 +77,12 @@ dev = [
     "pytest>=7.4.4",
     "pytest-asyncio>=0.23.3",
     "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "aiosqlite>=0.19.0",
     "black>=24.1.0",
     "ruff>=0.1.14",
     "mypy>=1.8.0",
+    "pre-commit>=3.6.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -97,4 +105,21 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]

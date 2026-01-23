@@ -28,6 +28,8 @@ class FilingData:
     monetary_values: list[dict[str, Any]] = field(default_factory=list)
     mentioned_entities: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Extracted sections (signature, risk_factors, forward_looking_statements, etc.)
+    extracted_sections: dict[str, str] = field(default_factory=dict)
 
 
 class FilingParser:
@@ -79,6 +81,31 @@ class FilingParser:
         "5.02",  # Officer departures
     }
 
+    # S-1 IPO-related keywords
+    IPO_KEYWORDS = {
+        "initial public offering",
+        "ipo",
+        "proposed maximum aggregate offering price",
+        "shares being offered",
+        "underwriters",
+        "underwriting agreement",
+        "prospectus",
+        "registration statement",
+    }
+
+    # Key S-1 sections to extract
+    S1_SECTIONS = {
+        "prospectus_summary": ["prospectus summary", "summary"],
+        "risk_factors": ["risk factors"],
+        "use_of_proceeds": ["use of proceeds"],
+        "dividend_policy": ["dividend policy"],
+        "capitalization": ["capitalization"],
+        "dilution": ["dilution"],
+        "business": ["business", "description of business"],
+        "management": ["management", "directors and executive officers"],
+        "underwriting": ["underwriting", "underwriters"],
+    }
+
     def __init__(self):
         """Initialize filing parser."""
         self._money_pattern = re.compile(
@@ -115,6 +142,8 @@ class FilingParser:
             self._parse_8k(content, filing)
         elif filing_type in ("10-Q", "10-K"):
             self._parse_periodic_report(content, filing)
+        elif filing_type == "S-1" or filing_type.startswith("S-1"):
+            self._parse_s1(content, filing)
         elif filing_type == "4":
             # Form 4 has specialized parser for insider trading
             from .form4_parser import Form4Parser
@@ -159,6 +188,15 @@ class FilingParser:
         # Extract common elements
         self._extract_monetary_values(content, filing)
         self._extract_entities(content, filing)
+
+        # Extract key sections (signature, exhibits, risk factors)
+        filing.extracted_sections = self.extract_sections(content)
+
+        # Extract exhibits list and add to filing
+        if "exhibits" in filing.extracted_sections:
+            exhibits_list = filing.extracted_sections.pop("exhibits")
+            if isinstance(exhibits_list, list):
+                filing.exhibits = exhibits_list
 
         return filing
 
@@ -228,6 +266,184 @@ class FilingParser:
 
         filing.metadata["sections_found"] = sections
 
+    def _parse_s1(self, content: str, filing: FilingData) -> None:
+        """Parse Form S-1 (IPO registration) content.
+
+        Extracts key IPO information including:
+        - Offering amount
+        - Share price range
+        - Shares being offered
+        - Underwriters
+        - Use of proceeds
+        - Risk factors summary
+        """
+        soup = BeautifulSoup(content, "lxml")
+        text = soup.get_text(separator=" ", strip=True)
+        filing.full_text = text[:100000]
+
+        # Extract IPO-specific data
+        ipo_data = {
+            "is_ipo": True,
+            "offering_amount": None,
+            "price_range": None,
+            "shares_offered": None,
+            "underwriters": [],
+            "use_of_proceeds": "",
+            "risk_factors_summary": "",
+            "sections_found": [],
+        }
+
+        # Extract proposed offering amount
+        offering_patterns = [
+            r"proposed maximum aggregate offering price[:\s]*\$?([\d,]+(?:\.\d+)?)\s*(?:million|billion)?",
+            r"aggregate offering price[:\s]*\$?([\d,]+(?:\.\d+)?)\s*(?:million|billion)?",
+            r"total offering[:\s]*\$?([\d,]+(?:\.\d+)?)\s*(?:million|billion)?",
+            r"raise[s]?\s+(?:up to\s+)?\$?([\d,]+(?:\.\d+)?)\s*(?:million|billion)?",
+        ]
+
+        for pattern in offering_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                amount_str = match.group(1).replace(",", "")
+                try:
+                    amount = float(amount_str)
+                    # Check for multiplier in the original match
+                    full_match = match.group(0).lower()
+                    if "billion" in full_match:
+                        amount *= 1_000_000_000
+                    elif "million" in full_match:
+                        amount *= 1_000_000
+                    ipo_data["offering_amount"] = amount
+                    break
+                except ValueError:
+                    pass
+
+        # Extract price range (e.g., "$15.00 to $17.00 per share")
+        price_range_patterns = [
+            r"\$([\d.]+)\s*(?:to|-)\s*\$([\d.]+)\s*per\s*share",
+            r"price range of \$([\d.]+)\s*(?:to|-)\s*\$([\d.]+)",
+            r"initial public offering price.*?\$([\d.]+)\s*(?:to|-)\s*\$([\d.]+)",
+        ]
+
+        for pattern in price_range_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                try:
+                    low_price = float(match.group(1))
+                    high_price = float(match.group(2))
+                    ipo_data["price_range"] = {
+                        "low": low_price,
+                        "high": high_price,
+                        "midpoint": (low_price + high_price) / 2,
+                    }
+                    break
+                except ValueError:
+                    pass
+
+        # Extract number of shares being offered
+        shares_patterns = [
+            r"offering\s+([\d,]+)\s*shares",
+            r"([\d,]+)\s*shares\s*(?:of\s+)?(?:common\s+stock\s+)?(?:are\s+)?being\s+offered",
+            r"sell\s+([\d,]+)\s*shares",
+            r"([\d,]+)\s*shares\s*at",
+        ]
+
+        for pattern in shares_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                try:
+                    shares = int(match.group(1).replace(",", ""))
+                    ipo_data["shares_offered"] = shares
+                    break
+                except ValueError:
+                    pass
+
+        # Extract underwriters
+        underwriter_patterns = [
+            r"(?:lead\s+)?(?:book-running\s+)?(?:managing\s+)?underwriter[s]?[:\s]+([A-Z][A-Za-z\s&,]+?)(?:\.|,\s*(?:Inc|LLC|LP)|$)",
+            r"(Goldman Sachs|Morgan Stanley|JPMorgan|J\.P\. Morgan|BofA Securities|Citigroup|Credit Suisse|Deutsche Bank|UBS|Barclays|Wells Fargo)",
+        ]
+
+        underwriters = set()
+        for pattern in underwriter_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                underwriter = match.strip()
+                if underwriter and len(underwriter) > 2 and len(underwriter) < 100:
+                    underwriters.add(underwriter)
+
+        ipo_data["underwriters"] = list(underwriters)[:10]
+
+        # Find and extract key sections
+        for section_name, keywords in self.S1_SECTIONS.items():
+            for keyword in keywords:
+                # Look for section header
+                section_pattern = rf"(?:^|\n)\s*{re.escape(keyword)}[:\s]*\n"
+                match = re.search(section_pattern, text, re.IGNORECASE | re.MULTILINE)
+                if match:
+                    ipo_data["sections_found"].append(section_name)
+
+                    # Extract section content (up to next section or 2000 chars)
+                    start_idx = match.end()
+                    section_text = text[start_idx:start_idx + 3000]
+
+                    if section_name == "risk_factors":
+                        # Get first 500 chars of risk factors as summary
+                        ipo_data["risk_factors_summary"] = section_text[:500].strip()
+                    elif section_name == "use_of_proceeds":
+                        ipo_data["use_of_proceeds"] = section_text[:1000].strip()
+
+                    break
+
+        # Generate headline
+        company_name = filing.company_name or "Company"
+        if ipo_data["offering_amount"]:
+            amount_str = self._format_money(ipo_data["offering_amount"])
+            filing.headline = f"S-1 IPO Registration: {company_name} - {amount_str} Offering"
+        else:
+            filing.headline = f"S-1 IPO Registration: {company_name}"
+
+        # Generate summary
+        summary_parts = [f"{company_name} filed an S-1 registration statement."]
+
+        if ipo_data["shares_offered"]:
+            summary_parts.append(f"Offering {ipo_data['shares_offered']:,} shares.")
+
+        if ipo_data["price_range"]:
+            summary_parts.append(
+                f"Price range: ${ipo_data['price_range']['low']:.2f} - ${ipo_data['price_range']['high']:.2f} per share."
+            )
+
+        if ipo_data["offering_amount"]:
+            summary_parts.append(f"Total offering: {self._format_money(ipo_data['offering_amount'])}.")
+
+        if ipo_data["underwriters"]:
+            summary_parts.append(f"Lead underwriter(s): {', '.join(ipo_data['underwriters'][:3])}.")
+
+        filing.summary = " ".join(summary_parts)
+
+        # Store IPO data in metadata
+        filing.metadata["ipo_data"] = ipo_data
+        filing.metadata["is_ipo"] = True
+
+    def _format_money(self, amount: float) -> str:
+        """Format a monetary amount for display.
+
+        Args:
+            amount: Dollar amount
+
+        Returns:
+            Formatted string (e.g., "$150M", "$1.5B")
+        """
+        if amount >= 1_000_000_000:
+            return f"${amount / 1_000_000_000:.1f}B"
+        elif amount >= 1_000_000:
+            return f"${amount / 1_000_000:.1f}M"
+        elif amount >= 1_000:
+            return f"${amount / 1_000:.1f}K"
+        else:
+            return f"${amount:,.2f}"
+
     def _parse_generic(self, content: str, filing: FilingData) -> None:
         """Parse generic filing content."""
         soup = BeautifulSoup(content, "lxml")
@@ -293,6 +509,277 @@ class FilingParser:
                     entities.add(match)
 
         filing.mentioned_entities = list(entities)[:20]
+
+    def extract_sections(self, content: str) -> dict[str, str]:
+        """Extract key sections from filing content.
+
+        Extracts:
+        - Signature block
+        - Exhibits list
+        - Risk factors
+        - Forward-looking statements
+
+        Args:
+            content: Raw filing content (HTML or plain text)
+
+        Returns:
+            Dictionary of section_name -> section_content
+        """
+        soup = BeautifulSoup(content, "lxml")
+        text = soup.get_text(separator="\n", strip=True)
+
+        sections = {}
+
+        # Extract signature block
+        signature = self._extract_signature_block(text)
+        if signature:
+            sections["signature"] = signature
+
+        # Extract exhibits
+        exhibits = self._extract_exhibits(text, soup)
+        if exhibits:
+            sections["exhibits"] = exhibits
+
+        # Extract risk factors
+        risk_factors = self._extract_risk_factors(text)
+        if risk_factors:
+            sections["risk_factors"] = risk_factors
+
+        # Extract forward-looking statements
+        forward_looking = self._extract_forward_looking(text)
+        if forward_looking:
+            sections["forward_looking_statements"] = forward_looking
+
+        return sections
+
+    def _extract_signature_block(self, text: str) -> str | None:
+        """Extract the signature block from a filing.
+
+        Args:
+            text: Plain text content
+
+        Returns:
+            Signature block text or None
+        """
+        # Common signature patterns
+        signature_patterns = [
+            r"(?:SIGNATURE[S]?)\s*(?:\n|$)([\s\S]{100,2000}?)(?:EXHIBIT|$)",
+            r"Pursuant to the requirements[^.]*signed[^.]*\.([\s\S]{100,2000}?)(?:EXHIBIT|$)",
+            r"IN WITNESS WHEREOF([\s\S]{100,2000}?)(?:EXHIBIT|$)",
+            r"(?:By:|/s/)\s*([A-Za-z\s,\.]+)(?:\n|$)",
+        ]
+
+        for pattern in signature_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                signature_text = match.group(1).strip()
+                # Clean up excessive whitespace
+                signature_text = re.sub(r'\n{3,}', '\n\n', signature_text)
+                if len(signature_text) > 20:
+                    return signature_text[:2000]
+
+        return None
+
+    def _extract_exhibits(self, text: str, soup: BeautifulSoup) -> list[dict[str, str]]:
+        """Extract list of exhibits from filing.
+
+        Args:
+            text: Plain text content
+            soup: BeautifulSoup parsed HTML
+
+        Returns:
+            List of exhibit dictionaries with number, description, and optional link
+        """
+        exhibits = []
+
+        # Pattern for exhibit entries (e.g., "Exhibit 10.1 - Employment Agreement")
+        exhibit_patterns = [
+            r"Exhibit\s+(\d+(?:\.\d+)?)\s*[-–]\s*([^\n]{5,200})",
+            r"Ex(?:h)?\.?\s*(\d+(?:\.\d+)?)\s*[-–]?\s*([^\n]{5,200})",
+            r"(\d+\.\d+)\s+([A-Z][^\n]{5,200})",  # Table format
+        ]
+
+        seen_exhibits = set()
+
+        for pattern in exhibit_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                exhibit_num = match[0].strip()
+                description = match[1].strip()
+
+                # Skip if already seen or description looks invalid
+                if exhibit_num in seen_exhibits:
+                    continue
+                if len(description) < 5 or description.isdigit():
+                    continue
+
+                seen_exhibits.add(exhibit_num)
+                exhibits.append({
+                    "number": exhibit_num,
+                    "description": description[:200],
+                })
+
+                if len(exhibits) >= 50:  # Limit to prevent noise
+                    break
+
+            if len(exhibits) >= 50:
+                break
+
+        # Also look for exhibit links in HTML
+        for link in soup.find_all("a", href=True):
+            href = link.get("href", "")
+            link_text = link.get_text(strip=True)
+
+            if "exhibit" in href.lower() or "ex" in href.lower():
+                # Try to extract exhibit number from link
+                num_match = re.search(r"ex(?:hibit)?[\s_-]*(\d+(?:\.\d+)?)", href, re.IGNORECASE)
+                if num_match:
+                    exhibit_num = num_match.group(1)
+                    if exhibit_num not in seen_exhibits:
+                        seen_exhibits.add(exhibit_num)
+                        exhibits.append({
+                            "number": exhibit_num,
+                            "description": link_text[:200] if link_text else "Exhibit Document",
+                            "link": href,
+                        })
+
+        return exhibits
+
+    def _extract_risk_factors(self, text: str) -> str | None:
+        """Extract risk factors section from filing.
+
+        Args:
+            text: Plain text content
+
+        Returns:
+            Risk factors text or None
+        """
+        # Find the risk factors section
+        risk_patterns = [
+            r"(?:ITEM\s+1A[.:]?\s*)?RISK\s+FACTORS\s*\n([\s\S]{500,}?)(?:ITEM\s+\d|UNRESOLVED\s+STAFF|PROPERTIES|$)",
+            r"RISK\s+FACTORS\s*\n([\s\S]{500,}?)(?:\n\s*[A-Z]{4,}|\n\s*ITEM\s+\d|$)",
+        ]
+
+        for pattern in risk_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                risk_text = match.group(1).strip()
+                # Clean up formatting
+                risk_text = re.sub(r'\n{3,}', '\n\n', risk_text)
+                # Return first 10000 chars (risk factors can be very long)
+                return risk_text[:10000]
+
+        return None
+
+    def _extract_forward_looking(self, text: str) -> str | None:
+        """Extract forward-looking statements disclaimer.
+
+        Args:
+            text: Plain text content
+
+        Returns:
+            Forward-looking statements text or None
+        """
+        patterns = [
+            r"(?:FORWARD-LOOKING\s+STATEMENTS?|SAFE\s+HARBOR)\s*\n?([\s\S]{100,3000}?)(?:\n\s*[A-Z]{4,}|\n\s*ITEM|$)",
+            r"(?:This\s+)?(?:press\s+release|document|report)\s+contains\s+forward-looking\s+statements?([\s\S]{100,2000}?)(?:\n\s*[A-Z]{4,}|$)",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                fls_text = match.group(1).strip()
+                if len(fls_text) > 50:
+                    return fls_text[:3000]
+
+        return None
+
+    def extract_key_content(self, content: str, filing_type: str) -> dict[str, Any]:
+        """Extract key content based on filing type.
+
+        This is a unified method that extracts the most relevant content
+        for each filing type.
+
+        Args:
+            content: Raw filing content
+            filing_type: Type of filing
+
+        Returns:
+            Dictionary with extracted key content
+        """
+        result = {
+            "sections": self.extract_sections(content),
+            "filing_type": filing_type,
+        }
+
+        soup = BeautifulSoup(content, "lxml")
+        text = soup.get_text(separator=" ", strip=True)
+
+        # Add filing-type specific extractions
+        if filing_type == "8-K":
+            # Extract 8-K items
+            items_found = []
+            for item_code in self.FORM_8K_ITEMS:
+                pattern = rf"Item\s*{re.escape(item_code)}"
+                if re.search(pattern, text, re.IGNORECASE):
+                    items_found.append({
+                        "code": item_code,
+                        "description": self.FORM_8K_ITEMS[item_code],
+                    })
+            result["items"] = items_found
+            result["is_high_signal"] = any(i["code"] in self.HIGH_SIGNAL_ITEMS for i in items_found)
+
+        elif filing_type == "S-1" or filing_type.startswith("S-1"):
+            # Extract IPO-specific content
+            result["ipo_keywords_found"] = [
+                kw for kw in self.IPO_KEYWORDS
+                if kw.lower() in text.lower()
+            ]
+
+        # Extract any tables (useful for financial data)
+        tables = self._extract_tables(soup)
+        if tables:
+            result["tables"] = tables[:5]  # Limit to first 5 tables
+
+        return result
+
+    def _extract_tables(self, soup: BeautifulSoup) -> list[dict[str, Any]]:
+        """Extract tables from HTML content.
+
+        Args:
+            soup: BeautifulSoup parsed HTML
+
+        Returns:
+            List of table dictionaries with headers and rows
+        """
+        tables = []
+
+        for table in soup.find_all("table")[:10]:  # Limit to first 10 tables
+            rows = table.find_all("tr")
+            if not rows:
+                continue
+
+            table_data = {
+                "headers": [],
+                "rows": [],
+            }
+
+            # Extract headers from first row or th elements
+            header_row = rows[0]
+            headers = header_row.find_all(["th", "td"])
+            table_data["headers"] = [h.get_text(strip=True)[:100] for h in headers]
+
+            # Extract data rows
+            for row in rows[1:20]:  # Limit rows
+                cells = row.find_all(["td", "th"])
+                row_data = [c.get_text(strip=True)[:100] for c in cells]
+                if any(row_data):  # Skip empty rows
+                    table_data["rows"].append(row_data)
+
+            if table_data["rows"]:
+                tables.append(table_data)
+
+        return tables
 
 
 def parse_filing(content: str, filing_type: str, metadata: dict[str, Any] | None = None) -> FilingData:

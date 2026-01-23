@@ -3,14 +3,14 @@
 import asyncio
 from datetime import datetime, timezone
 from typing import AsyncGenerator, Generator
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from backend.api.main import app
 from backend.storage.timescale.connection import Base
 
 
@@ -59,10 +59,26 @@ async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
 
 
 @pytest_asyncio.fixture
-async def client() -> AsyncGenerator[AsyncClient, None]:
-    """Create test HTTP client."""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+async def client(test_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+    """Create test HTTP client with mocked database dependency."""
+    from backend.api.main import app
+    from backend.api.dependencies import get_db
+
+    # Override the database dependency
+    async def override_get_db():
+        yield test_session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    # Mock the lifespan context to skip database initialization
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as ac:
         yield ac
+
+    # Clean up overrides
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture

@@ -192,32 +192,83 @@ def scrape_twitter_stream(self, tickers: list[str] | None = None) -> dict[str, A
 
 @celery_app.task(bind=True, max_retries=2)
 def check_otc_tiers(self) -> dict[str, Any]:
-    """Check for OTC tier changes.
+    """Check for OTC tier changes and generate events.
+
+    This task monitors OTC Markets for tier changes (upgrades/downgrades)
+    and creates events for each detected change. Tier changes are significant
+    events for OTC stocks as they indicate changes in compliance status,
+    reporting standards, and overall company health.
+
+    OTC Tiers (from best to worst):
+    - OTCQX: Best Market - highest standards
+    - OTCQB: Venture Market - emerging growth
+    - Pink Current: Limited information
+    - Pink Limited: Minimal information
+    - Pink No Information: No information
+    - Grey Market: Not quoted
+    - Expert Market: Restricted
 
     Returns:
-        Dictionary with tier changes
+        Dictionary with tier change results including:
+        - changes: List of tier change events
+        - count: Number of changes detected
+        - upgrades: Count of tier upgrades
+        - downgrades: Count of tier downgrades
+        - error: Error message if any
     """
     async def _check():
         from backend.ingestion.otc_markets import TierMonitor
 
-        results = {"changes": [], "error": None}
+        results = {
+            "changes": [],
+            "count": 0,
+            "upgrades": 0,
+            "downgrades": 0,
+            "error": None,
+        }
 
         try:
-            async with TierMonitor() as monitor:
+            # Use persistence to track tiers across task runs
+            async with TierMonitor(use_persistence=True) as monitor:
+                # Get tier changes from the last day
+                # The monitor handles deduplication via Redis persistence
                 changes = await monitor.get_tier_changes(days=1)
 
+                logger.info(
+                    "OTC tier check completed",
+                    changes_found=len(changes),
+                )
+
                 for change in changes:
+                    # Convert to event format
                     event = monitor.tier_change_to_event(change)
                     results["changes"].append(event)
 
-                    # Publish for processing
+                    # Track upgrade/downgrade counts
+                    if change.is_upgrade:
+                        results["upgrades"] += 1
+                    elif change.is_downgrade:
+                        results["downgrades"] += 1
+
+                    # Publish for processing through the pipeline
+                    # Since tier changes are already classified, use process_event
                     process_event.delay(event)
+
+                    logger.info(
+                        "Tier change event queued",
+                        symbol=change.symbol,
+                        old_tier=change.old_tier.value,
+                        new_tier=change.new_tier.value,
+                        is_upgrade=change.is_upgrade,
+                        signal_strength=change.signal_strength,
+                    )
 
             results["count"] = len(results["changes"])
 
         except Exception as e:
-            logger.error("OTC tier check failed", error=str(e))
+            logger.error("OTC tier check failed", error=str(e), exc_info=True)
             results["error"] = str(e)
+            # Retry with 5 minute delay
             raise self.retry(exc=e, countdown=300)
 
         return results

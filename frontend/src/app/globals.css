@@ -54,6 +54,56 @@
                      radial-gradient(at 80% 80%, hsl(40 40% 97%) 0px, transparent 50%);
   }
 
+  /* Dark mode theme */
+  .dark {
+    /* Core palette - Deep rich backgrounds */
+    --bg-primary: 222 25% 8%;
+    --bg-secondary: 222 20% 11%;
+    --bg-tertiary: 222 18% 14%;
+    --bg-elevated: 222 22% 12%;
+
+    /* Text hierarchy */
+    --text-primary: 210 20% 95%;
+    --text-secondary: 215 15% 70%;
+    --text-tertiary: 220 10% 50%;
+    --text-quaternary: 220 8% 38%;
+
+    /* Electric accent - Vibrant cyan-blue (stays vivid) */
+    --accent: 195 100% 50%;
+    --accent-hover: 195 100% 60%;
+    --accent-subtle: 195 50% 15%;
+    --accent-glow: 195 100% 55%;
+
+    /* Signal colors - Adjusted for dark */
+    --positive: 160 65% 50%;
+    --positive-subtle: 160 40% 15%;
+    --negative: 0 70% 60%;
+    --negative-subtle: 0 40% 15%;
+    --warning: 35 90% 55%;
+    --warning-subtle: 35 50% 15%;
+
+    /* Borders and dividers */
+    --border: 222 15% 20%;
+    --border-strong: 222 12% 28%;
+    --border-focus: 195 100% 50%;
+
+    /* Interactive states */
+    --hover: 222 18% 16%;
+    --active: 222 15% 20%;
+
+    /* Shadows */
+    --shadow-color: 222 40% 5%;
+    --shadow-sm: 0 1px 2px hsl(var(--shadow-color) / 0.3);
+    --shadow-md: 0 4px 12px hsl(var(--shadow-color) / 0.4);
+    --shadow-lg: 0 8px 30px hsl(var(--shadow-color) / 0.5);
+    --shadow-xl: 0 16px 50px hsl(var(--shadow-color) / 0.6);
+
+    /* Gradients */
+    --gradient-subtle: linear-gradient(135deg, hsl(222 25% 10%) 0%, hsl(222 20% 12%) 100%);
+    --gradient-mesh: radial-gradient(at 40% 20%, hsl(195 40% 12%) 0px, transparent 50%),
+                     radial-gradient(at 80% 80%, hsl(280 30% 10%) 0px, transparent 50%);
+  }
+
   * {
     border-color: hsl(var(--border));
   }

@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Alert, Event, User, Watchlist
+from .models import Alert, APIKey, Event, User, Watchlist
 
 
 class EventQueries:
@@ -319,6 +319,171 @@ class UserQueries:
         await self.session.flush()
         return user
 
+    async def get_user_by_password_reset_token(self, token: str) -> User | None:
+        """Get user by password reset token.
+
+        Args:
+            token: Password reset token
+
+        Returns:
+            User if found and token is valid, None otherwise
+        """
+        result = await self.session.execute(
+            select(User).where(
+                and_(
+                    User.password_reset_token == token,
+                    User.password_reset_expires >= datetime.now(timezone.utc),
+                )
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def set_password_reset_token(
+        self,
+        user_id: UUID,
+        token: str,
+        expires_at: datetime,
+    ) -> bool:
+        """Set password reset token for a user.
+
+        Args:
+            user_id: User UUID
+            token: Reset token
+            expires_at: Token expiration time
+
+        Returns:
+            True if updated successfully
+        """
+        result = await self.session.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+
+        if user:
+            user.password_reset_token = token
+            user.password_reset_expires = expires_at
+            await self.session.flush()
+            return True
+
+        return False
+
+    async def clear_password_reset_token(self, user_id: UUID) -> bool:
+        """Clear password reset token for a user.
+
+        Args:
+            user_id: User UUID
+
+        Returns:
+            True if cleared successfully
+        """
+        result = await self.session.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+
+        if user:
+            user.password_reset_token = None
+            user.password_reset_expires = None
+            await self.session.flush()
+            return True
+
+        return False
+
+    async def update_password(self, user_id: UUID, hashed_password: str) -> bool:
+        """Update user password.
+
+        Args:
+            user_id: User UUID
+            hashed_password: New hashed password
+
+        Returns:
+            True if updated successfully
+        """
+        result = await self.session.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+
+        if user:
+            user.hashed_password = hashed_password
+            user.password_reset_token = None
+            user.password_reset_expires = None
+            await self.session.flush()
+            return True
+
+        return False
+
+    async def get_user_by_verification_token(self, token: str) -> User | None:
+        """Get user by email verification token.
+
+        Args:
+            token: Email verification token
+
+        Returns:
+            User if found and token is valid, None otherwise
+        """
+        result = await self.session.execute(
+            select(User).where(
+                and_(
+                    User.email_verification_token == token,
+                    User.email_verification_expires >= datetime.now(timezone.utc),
+                )
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def set_email_verification_token(
+        self,
+        user_id: UUID,
+        token: str,
+        expires_at: datetime,
+    ) -> bool:
+        """Set email verification token for a user.
+
+        Args:
+            user_id: User UUID
+            token: Verification token
+            expires_at: Token expiration time
+
+        Returns:
+            True if updated successfully
+        """
+        result = await self.session.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+
+        if user:
+            user.email_verification_token = token
+            user.email_verification_expires = expires_at
+            await self.session.flush()
+            return True
+
+        return False
+
+    async def verify_email(self, user_id: UUID) -> bool:
+        """Mark user email as verified.
+
+        Args:
+            user_id: User UUID
+
+        Returns:
+            True if updated successfully
+        """
+        result = await self.session.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+
+        if user:
+            user.is_verified = True
+            user.email_verification_token = None
+            user.email_verification_expires = None
+            await self.session.flush()
+            return True
+
+        return False
+
 
 class WatchlistQueries:
     """Query methods for watchlists."""
@@ -577,3 +742,169 @@ class AlertQueries:
                 return False
 
         return True
+
+
+class APIKeyQueries:
+    """Query methods for API keys."""
+
+    def __init__(self, session: AsyncSession):
+        """Initialize with database session."""
+        self.session = session
+
+    async def create_api_key(self, api_key_data: dict[str, Any]) -> APIKey:
+        """Create a new API key.
+
+        Args:
+            api_key_data: API key data dictionary
+
+        Returns:
+            Created APIKey
+        """
+        api_key = APIKey(**api_key_data)
+        self.session.add(api_key)
+        await self.session.flush()
+        return api_key
+
+    async def get_api_key_by_hash(self, key_hash: str) -> APIKey | None:
+        """Get API key by its hash.
+
+        Args:
+            key_hash: SHA256 hash of the API key
+
+        Returns:
+            APIKey or None
+        """
+        result = await self.session.execute(
+            select(APIKey).where(
+                and_(
+                    APIKey.key_hash == key_hash,
+                    APIKey.is_active == True,
+                )
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_api_key_by_id(self, key_id: UUID) -> APIKey | None:
+        """Get API key by ID.
+
+        Args:
+            key_id: API key UUID
+
+        Returns:
+            APIKey or None
+        """
+        result = await self.session.execute(
+            select(APIKey).where(APIKey.id == key_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_user_api_keys(self, user_id: UUID) -> list[APIKey]:
+        """Get all API keys for a user.
+
+        Args:
+            user_id: User UUID
+
+        Returns:
+            List of API keys
+        """
+        result = await self.session.execute(
+            select(APIKey)
+            .where(APIKey.user_id == user_id)
+            .order_by(APIKey.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def update_api_key_usage(
+        self,
+        key_id: UUID,
+        client_ip: str | None = None,
+    ) -> None:
+        """Update API key last used timestamp and request count.
+
+        Args:
+            key_id: API key UUID
+            client_ip: Client IP address
+        """
+        result = await self.session.execute(
+            select(APIKey).where(APIKey.id == key_id)
+        )
+        api_key = result.scalar_one_or_none()
+
+        if api_key:
+            api_key.last_used_at = datetime.now(timezone.utc)
+            api_key.request_count = (api_key.request_count or 0) + 1
+            if client_ip:
+                api_key.last_ip = client_ip
+            await self.session.flush()
+
+    async def deactivate_api_key(self, key_id: UUID, user_id: UUID) -> bool:
+        """Deactivate an API key.
+
+        Args:
+            key_id: API key UUID
+            user_id: User UUID (for ownership verification)
+
+        Returns:
+            True if deactivated, False if not found or not owned
+        """
+        result = await self.session.execute(
+            select(APIKey).where(
+                and_(
+                    APIKey.id == key_id,
+                    APIKey.user_id == user_id,
+                )
+            )
+        )
+        api_key = result.scalar_one_or_none()
+
+        if api_key:
+            api_key.is_active = False
+            await self.session.flush()
+            return True
+
+        return False
+
+    async def delete_api_key(self, key_id: UUID, user_id: UUID) -> bool:
+        """Delete an API key.
+
+        Args:
+            key_id: API key UUID
+            user_id: User UUID (for ownership verification)
+
+        Returns:
+            True if deleted, False if not found or not owned
+        """
+        result = await self.session.execute(
+            select(APIKey).where(
+                and_(
+                    APIKey.id == key_id,
+                    APIKey.user_id == user_id,
+                )
+            )
+        )
+        api_key = result.scalar_one_or_none()
+
+        if api_key:
+            await self.session.delete(api_key)
+            return True
+
+        return False
+
+    async def count_user_api_keys(self, user_id: UUID) -> int:
+        """Count active API keys for a user.
+
+        Args:
+            user_id: User UUID
+
+        Returns:
+            Count of active API keys
+        """
+        result = await self.session.execute(
+            select(func.count(APIKey.id)).where(
+                and_(
+                    APIKey.user_id == user_id,
+                    APIKey.is_active == True,
+                )
+            )
+        )
+        return result.scalar() or 0

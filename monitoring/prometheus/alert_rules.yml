@@ -1,0 +1,366 @@
+# Prometheus Alert Rules for News Scraper
+groups:
+  # API Health Alerts
+  - name: api_alerts
+    interval: 30s
+    rules:
+      # High Error Rate
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m])) by (service)
+            /
+            sum(rate(http_requests_total[5m])) by (service)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "High error rate detected on {{ $labels.service }}"
+          description: "Service {{ $labels.service }} has error rate > 5% (current: {{ $value | humanizePercentage }})"
+          runbook_url: "https://wiki.example.com/runbook/high-error-rate"
+
+      # API Latency
+      - alert: HighAPILatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket{service="api"}[5m])) by (le, endpoint)
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High API latency on {{ $labels.endpoint }}"
+          description: "95th percentile latency > 2s for {{ $labels.endpoint }} (current: {{ $value | humanizeDuration }})"
+
+      # API Down
+      - alert: APIServiceDown
+        expr: up{job="api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "API service is down"
+          description: "The main API service has been unreachable for more than 1 minute"
+
+  # Scraper Alerts
+  - name: scraper_alerts
+    interval: 30s
+    rules:
+      # SEC Scraper Failures
+      - alert: SECScraperFailure
+        expr: |
+          increase(scraper_errors_total{scraper="sec_edgar"}[15m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: scraper
+        annotations:
+          summary: "SEC EDGAR scraper experiencing failures"
+          description: "SEC scraper has {{ $value }} errors in the last 15 minutes"
+
+      # News Scraper Failures
+      - alert: NewsScraperFailure
+        expr: |
+          increase(scraper_errors_total{scraper=~"prnewswire|globenewswire|businesswire"}[30m]) > 10
+        for: 10m
+        labels:
+          severity: warning
+          component: scraper
+        annotations:
+          summary: "News scraper {{ $labels.scraper }} experiencing failures"
+          description: "{{ $labels.scraper }} has {{ $value }} errors in the last 30 minutes"
+
+      # No Events Ingested
+      - alert: NoEventsIngested
+        expr: |
+          increase(events_ingested_total[30m]) == 0
+        for: 30m
+        labels:
+          severity: warning
+          component: scraper
+        annotations:
+          summary: "No events ingested in 30 minutes"
+          description: "Event ingestion has stopped - check scrapers and pipeline"
+
+      # Scraper Rate Limit
+      - alert: ScraperRateLimited
+        expr: |
+          increase(scraper_rate_limited_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: info
+          component: scraper
+        annotations:
+          summary: "Scraper {{ $labels.scraper }} is being rate limited"
+          description: "Rate limiting detected on {{ $labels.scraper }}"
+
+  # Database Alerts
+  - name: database_alerts
+    interval: 30s
+    rules:
+      # Database Connection Errors
+      - alert: DatabaseConnectionErrors
+        expr: |
+          increase(database_connection_errors_total[5m]) > 5
+        for: 2m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "Database connection errors detected"
+          description: "{{ $value }} database connection errors in the last 5 minutes"
+
+      # Database Down
+      - alert: DatabaseDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "PostgreSQL/TimescaleDB is down"
+          description: "Database has been unreachable for more than 1 minute"
+
+      # High Database Connections
+      - alert: HighDatabaseConnections
+        expr: |
+          pg_stat_activity_count > 90
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "High number of database connections"
+          description: "Database has {{ $value }} active connections (limit: 100)"
+
+      # Database Disk Space
+      - alert: DatabaseDiskSpaceLow
+        expr: |
+          pg_database_size_bytes / (1024 * 1024 * 1024) > 50
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database size exceeding 50GB"
+          description: "Database size is {{ $value | humanize1024 }}B"
+
+  # Redis Alerts
+  - name: redis_alerts
+    interval: 30s
+    rules:
+      # Redis Down
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: redis
+        annotations:
+          summary: "Redis is down"
+          description: "Redis has been unreachable for more than 1 minute"
+
+      # Redis Memory High
+      - alert: RedisMemoryHigh
+        expr: |
+          redis_memory_used_bytes / redis_memory_max_bytes > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          component: redis
+        annotations:
+          summary: "Redis memory usage high"
+          description: "Redis is using {{ $value | humanizePercentage }} of available memory"
+
+      # Redis Connection Errors
+      - alert: RedisConnectionErrors
+        expr: |
+          increase(redis_rejected_connections_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          component: redis
+        annotations:
+          summary: "Redis rejecting connections"
+          description: "Redis has rejected {{ $value }} connections in the last 5 minutes"
+
+  # Celery Task Alerts
+  - name: celery_alerts
+    interval: 30s
+    rules:
+      # Task Failures
+      - alert: CeleryTaskFailures
+        expr: |
+          increase(celery_task_failed_total[15m]) > 20
+        for: 5m
+        labels:
+          severity: warning
+          component: celery
+        annotations:
+          summary: "High Celery task failure rate"
+          description: "{{ $value }} task failures in the last 15 minutes"
+
+      # Worker Down
+      - alert: CeleryWorkerDown
+        expr: |
+          celery_workers < 1
+        for: 2m
+        labels:
+          severity: critical
+          component: celery
+        annotations:
+          summary: "No Celery workers available"
+          description: "All Celery workers are down"
+
+      # Queue Backlog
+      - alert: CeleryQueueBacklog
+        expr: |
+          celery_queue_length{queue="critical"} > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: celery
+        annotations:
+          summary: "Celery critical queue backlog"
+          description: "Critical queue has {{ $value }} pending tasks"
+
+  # OpenSearch Alerts
+  - name: opensearch_alerts
+    interval: 30s
+    rules:
+      # OpenSearch Down
+      - alert: OpenSearchDown
+        expr: up{job="opensearch"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: opensearch
+        annotations:
+          summary: "OpenSearch is down"
+          description: "OpenSearch has been unreachable for more than 1 minute"
+
+      # OpenSearch Indexing Errors
+      - alert: OpenSearchIndexingErrors
+        expr: |
+          increase(opensearch_indexing_errors_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: opensearch
+        annotations:
+          summary: "OpenSearch indexing errors"
+          description: "{{ $value }} indexing errors in the last 5 minutes"
+
+  # Infrastructure Alerts
+  - name: infrastructure_alerts
+    interval: 30s
+    rules:
+      # High CPU Usage
+      - alert: HighCPUUsage
+        expr: |
+          100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 10m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is {{ $value | humanize }}%"
+
+      # High Memory Usage
+      - alert: HighMemoryUsage
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is {{ $value | humanize }}%"
+
+      # Disk Space Low
+      - alert: DiskSpaceLow
+        expr: |
+          (1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"})) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "Disk space low on {{ $labels.instance }}"
+          description: "Disk usage is {{ $value | humanize }}% on {{ $labels.mountpoint }}"
+
+      # Container Restart
+      - alert: ContainerRestarting
+        expr: |
+          increase(container_restart_count[15m]) > 3
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "Container {{ $labels.container_name }} restarting frequently"
+          description: "Container has restarted {{ $value }} times in the last 15 minutes"
+
+  # NLP/ML Pipeline Alerts
+  - name: nlp_alerts
+    interval: 30s
+    rules:
+      # Sentiment Analysis Errors
+      - alert: SentimentAnalysisErrors
+        expr: |
+          increase(sentiment_analysis_errors_total[15m]) > 20
+        for: 5m
+        labels:
+          severity: warning
+          component: nlp
+        annotations:
+          summary: "High sentiment analysis error rate"
+          description: "{{ $value }} sentiment analysis errors in the last 15 minutes"
+
+      # Slow NLP Processing
+      - alert: SlowNLPProcessing
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(nlp_processing_duration_seconds_bucket[5m])) by (le, task_type)
+          ) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: nlp
+        annotations:
+          summary: "Slow NLP processing for {{ $labels.task_type }}"
+          description: "95th percentile NLP processing time > 10s"
+
+  # Business Metric Alerts
+  - name: business_alerts
+    interval: 60s
+    rules:
+      # Low Alpha Score Events
+      - alert: NoHighAlphaEvents
+        expr: |
+          sum(increase(high_alpha_events_total[1h])) == 0
+        for: 2h
+        labels:
+          severity: info
+          component: business
+        annotations:
+          summary: "No high-alpha events in 2 hours"
+          description: "No events with alpha score > 0.7 have been detected"
+
+      # WebSocket Connections
+      - alert: LowWebSocketConnections
+        expr: |
+          websocket_active_connections < 1
+        for: 30m
+        labels:
+          severity: info
+          component: websocket
+        annotations:
+          summary: "No active WebSocket connections"
+          description: "No clients connected via WebSocket"

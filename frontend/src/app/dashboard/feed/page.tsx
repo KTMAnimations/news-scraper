@@ -1,20 +1,22 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useCallback, useMemo } from 'react';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import {
   Filter,
   SortAsc,
   SortDesc,
   RefreshCw,
-  ChevronLeft,
-  ChevronRight,
   X,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { EventCard } from '@/components/events/EventCard';
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { WatchlistFilterToggle } from '@/components/watchlist/WatchlistQuickView';
+import { useInfiniteScroll } from '@/hooks/useInfiniteScroll';
+import { useWatchlist } from '@/hooks/useWatchlist';
 import { cn } from '@/lib/utils';
-import type { EventFilters, Direction, SentimentLabel } from '@/types/events';
+import type { EventFilters, Direction, SentimentLabel, Event } from '@/types/events';
 
 const EVENT_TYPES = [
   'INSIDER_BUY',
@@ -40,45 +42,90 @@ const SENTIMENTS: SentimentLabel[] = ['positive', 'negative', 'neutral'];
 type SortField = 'event_time' | 'alpha_score' | 'sentiment_score';
 type SortOrder = 'asc' | 'desc';
 
+const PAGE_SIZE = 20;
+
 export default function EventFeedPage() {
   const [filters, setFilters] = useState<EventFilters>({});
   const [sortField, setSortField] = useState<SortField>('event_time');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
-  const [page, setPage] = useState(1);
   const [showFilters, setShowFilters] = useState(false);
-  const pageSize = 20;
+  const [watchlistOnly, setWatchlistOnly] = useState(false);
+  const { items: watchlistItems } = useWatchlist();
 
-  const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ['events', 'feed', filters, page, pageSize],
-    queryFn: () =>
-      api.getEvents({
+  // Use infinite query for pagination
+  const {
+    data,
+    isLoading,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    refetch,
+    isFetching,
+  } = useInfiniteQuery({
+    queryKey: ['events', 'feed', filters],
+    queryFn: async ({ pageParam = 1 }) => {
+      return api.getEvents({
         ...filters,
-        page,
-        page_size: pageSize,
-      }),
+        page: pageParam,
+        page_size: PAGE_SIZE,
+      });
+    },
+    getNextPageParam: (lastPage, allPages) => {
+      const totalLoaded = allPages.length * PAGE_SIZE;
+      if (totalLoaded < lastPage.total) {
+        return allPages.length + 1;
+      }
+      return undefined;
+    },
+    initialPageParam: 1,
   });
 
-  const events = data?.events || [];
-  const total = data?.total || 0;
-  const totalPages = Math.ceil(total / pageSize);
+  // Flatten all pages into a single array of events
+  const allEvents = useMemo(() => {
+    if (!data?.pages) return [];
+    return data.pages.flatMap((page) => page.events);
+  }, [data?.pages]);
+
+  const total = data?.pages[0]?.total || 0;
+
+  // Filter for watchlist only if enabled
+  const filteredEvents = useMemo(() => {
+    if (!watchlistOnly || watchlistItems.length === 0) return allEvents;
+    const watchedTickers = new Set(watchlistItems.map((item) => item.ticker));
+    return allEvents.filter((event: Event) => watchedTickers.has(event.ticker));
+  }, [allEvents, watchlistOnly, watchlistItems]);
 
   // Sort events locally (API should handle this, but as fallback)
-  const sortedEvents = [...events].sort((a, b) => {
-    let aVal: number, bVal: number;
-    switch (sortField) {
-      case 'alpha_score':
-        aVal = a.alpha_score || 0;
-        bVal = b.alpha_score || 0;
-        break;
-      case 'sentiment_score':
-        aVal = a.sentiment_score || 0;
-        bVal = b.sentiment_score || 0;
-        break;
-      default:
-        aVal = new Date(a.event_time).getTime();
-        bVal = new Date(b.event_time).getTime();
-    }
-    return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+  const sortedEvents = useMemo(() => {
+    return [...filteredEvents].sort((a: Event, b: Event) => {
+      let aVal: number, bVal: number;
+      switch (sortField) {
+        case 'alpha_score':
+          aVal = a.alpha_score || 0;
+          bVal = b.alpha_score || 0;
+          break;
+        case 'sentiment_score':
+          aVal = a.sentiment_score || 0;
+          bVal = b.sentiment_score || 0;
+          break;
+        default:
+          aVal = new Date(a.event_time).getTime();
+          bVal = new Date(b.event_time).getTime();
+      }
+      return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+    });
+  }, [filteredEvents, sortField, sortOrder]);
+
+  // Infinite scroll hook
+  const { sentinelRef } = useInfiniteScroll({
+    onLoadMore: () => {
+      if (hasNextPage && !isFetchingNextPage) {
+        fetchNextPage();
+      }
+    },
+    hasMore: !!hasNextPage,
+    isLoading: isFetchingNextPage,
+    rootMargin: '200px',
   });
 
   const updateFilter = useCallback(
@@ -90,14 +137,12 @@ export default function EventFeedPage() {
         }
         return { ...prev, [key]: value };
       });
-      setPage(1);
     },
     []
   );
 
   const clearFilters = useCallback(() => {
     setFilters({});
-    setPage(1);
   }, []);
 
   const activeFilterCount = Object.keys(filters).length;
@@ -294,9 +339,15 @@ export default function EventFeedPage() {
 
       {/* Sort Controls & Results Info */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-text-tertiary">
-          Showing {events.length} of {total} events
-        </p>
+        <div className="flex items-center gap-4">
+          <p className="text-sm text-text-tertiary">
+            Showing {sortedEvents.length} of {total} events
+          </p>
+          <WatchlistFilterToggle
+            enabled={watchlistOnly}
+            onChange={setWatchlistOnly}
+          />
+        </div>
 
         <div className="flex items-center gap-3">
           <span className="text-sm text-text-tertiary">Sort by:</span>
@@ -327,8 +378,7 @@ export default function EventFeedPage() {
       <div className="card rounded-2xl overflow-hidden">
         {isLoading ? (
           <div className="p-8 text-center">
-            <div className="w-8 h-8 skeleton rounded-lg mx-auto mb-3" />
-            <p className="text-sm text-text-tertiary">Loading events...</p>
+            <LoadingSpinner message="Loading events..." />
           </div>
         ) : sortedEvents.length === 0 ? (
           <div className="p-12 text-center">
@@ -343,62 +393,28 @@ export default function EventFeedPage() {
             </p>
           </div>
         ) : (
-          sortedEvents.map((event) => (
-            <EventCard key={event.id} event={event} />
-          ))
+          <>
+            {sortedEvents.map((event) => (
+              <EventCard key={event.id} event={event} />
+            ))}
+
+            {/* Infinite scroll sentinel */}
+            <div
+              ref={sentinelRef}
+              className="py-4"
+            >
+              {isFetchingNextPage && (
+                <LoadingSpinner size="sm" message="Loading more events..." />
+              )}
+              {!hasNextPage && sortedEvents.length > 0 && (
+                <p className="text-center text-sm text-text-tertiary py-4">
+                  You've reached the end of the feed
+                </p>
+              )}
+            </div>
+          </>
         )}
       </div>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2">
-          <button
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page === 1}
-            className="btn btn-secondary p-2 disabled:opacity-50"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-
-          <div className="flex items-center gap-1">
-            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-              let pageNum: number;
-              if (totalPages <= 5) {
-                pageNum = i + 1;
-              } else if (page <= 3) {
-                pageNum = i + 1;
-              } else if (page >= totalPages - 2) {
-                pageNum = totalPages - 4 + i;
-              } else {
-                pageNum = page - 2 + i;
-              }
-
-              return (
-                <button
-                  key={pageNum}
-                  onClick={() => setPage(pageNum)}
-                  className={cn(
-                    'w-9 h-9 rounded-lg text-sm font-medium transition-colors',
-                    page === pageNum
-                      ? 'bg-text-primary text-bg-primary'
-                      : 'hover:bg-hover text-text-secondary'
-                  )}
-                >
-                  {pageNum}
-                </button>
-              );
-            })}
-          </div>
-
-          <button
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page === totalPages}
-            className="btn btn-secondary p-2 disabled:opacity-50"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-      )}
     </div>
   );
 }

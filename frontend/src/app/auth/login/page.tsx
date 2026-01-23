@@ -96,7 +96,7 @@ function LoginFormContent() {
               Password
             </label>
             <Link
-              href="/auth/forgot-password"
+              href="/forgot-password"
               className="text-sm text-accent hover:text-accent-hover transition-colors"
             >
               Forgot password?
@@ -175,7 +175,7 @@ function LoginFormContent() {
       <p className="mt-8 text-center text-sm text-text-secondary">
         Don&apos;t have an account?{' '}
         <Link
-          href="/auth/register"
+          href="/register"
           className="text-accent hover:text-accent-hover font-medium transition-colors link-underline"
         >
           Create one

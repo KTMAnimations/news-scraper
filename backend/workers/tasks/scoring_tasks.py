@@ -315,3 +315,300 @@ def predict_direction_task(data: dict[str, Any]) -> dict[str, Any]:
     data["direction_factors"] = prediction.factors
 
     return data
+
+
+@celery_app.task
+def apply_alpha_decay_task(data: dict[str, Any]) -> dict[str, Any]:
+    """Apply real-time alpha decay to an event.
+
+    Calculates the decayed alpha score based on event type and time elapsed.
+    Different event types have different decay profiles (e.g., FDA approval
+    decays faster than general news).
+
+    Args:
+        data: Event data with alpha_score and event_time
+
+    Returns:
+        Data with decayed alpha score and decay metadata
+    """
+    from backend.processing.classification import EventType
+    from backend.processing.scoring import AlphaDecayCalculator
+
+    try:
+        event_type = EventType(data.get("event_type", "NEWS"))
+    except ValueError:
+        event_type = EventType.NEWS
+
+    # Get original alpha score
+    original_alpha = data.get("alpha_original") or data.get("alpha_score", 0)
+
+    # Parse event time
+    event_time = None
+    time_str = data.get("event_time") or data.get("published_at") or data.get("created_at")
+    if time_str:
+        try:
+            if isinstance(time_str, str):
+                event_time = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
+            elif isinstance(time_str, datetime):
+                event_time = time_str
+        except (ValueError, TypeError):
+            event_time = datetime.now(timezone.utc)
+
+    if event_time is None:
+        event_time = datetime.now(timezone.utc)
+
+    # Calculate decay
+    calculator = AlphaDecayCalculator()
+    decay_result = calculator.calculate_decay(
+        alpha_score=original_alpha,
+        event_type=event_type,
+        event_time=event_time,
+    )
+
+    # Update data with decayed values
+    data["alpha_score"] = decay_result.decayed_alpha
+    data["alpha_original"] = decay_result.original_alpha
+    data["alpha_decay_factor"] = decay_result.decay_factor
+    data["alpha_decay_profile"] = decay_result.decay_profile.value
+    data["alpha_age_hours"] = decay_result.age_hours
+    data["alpha_is_stale"] = decay_result.is_stale
+    data["alpha_half_life_hours"] = decay_result.half_life_hours
+
+    if decay_result.time_to_stale is not None:
+        data["alpha_time_to_stale_hours"] = decay_result.time_to_stale
+
+    data["alpha_decay_updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    logger.debug(
+        "Alpha decay applied",
+        ticker=data.get("ticker"),
+        original=original_alpha,
+        decayed=decay_result.decayed_alpha,
+        decay_factor=decay_result.decay_factor,
+        profile=decay_result.decay_profile.value,
+        is_stale=decay_result.is_stale,
+    )
+
+    return data
+
+
+@celery_app.task
+def update_alpha_decay_batch(max_events: int = 1000) -> dict[str, Any]:
+    """Periodically update alpha decay for recent non-stale events.
+
+    This task should be scheduled to run every few minutes to keep
+    alpha scores current.
+
+    Args:
+        max_events: Maximum number of events to update per run
+
+    Returns:
+        Summary of updates performed
+    """
+    import asyncio
+    from datetime import timedelta
+
+    from backend.storage.timescale import get_sync_db_session
+    from backend.processing.classification import EventType
+    from backend.processing.scoring import AlphaDecayCalculator, PeriodicAlphaDecayUpdater
+
+    updated = 0
+    stale_count = 0
+    errors = 0
+    current_time = datetime.now(timezone.utc)
+
+    try:
+        # Get database session
+        session = get_sync_db_session()
+
+        try:
+            from sqlalchemy import text
+
+            # Get recent non-stale events (last 72 hours)
+            # Events older than 72 hours are likely fully decayed
+            cutoff = current_time - timedelta(hours=72)
+
+            result = session.execute(
+                text("""
+                    SELECT id, event_type, event_time, alpha_score, alpha_original
+                    FROM events
+                    WHERE event_time > :cutoff
+                    AND (alpha_is_stale IS NULL OR alpha_is_stale = false)
+                    ORDER BY event_time DESC
+                    LIMIT :limit
+                """),
+                {"cutoff": cutoff, "limit": max_events}
+            )
+
+            events = result.fetchall()
+
+            calculator = AlphaDecayCalculator()
+
+            for row in events:
+                try:
+                    event_id = row[0]
+                    event_type_str = row[1] or "NEWS"
+                    event_time = row[2]
+                    current_alpha = row[3] or 0
+                    original_alpha = row[4] or current_alpha
+
+                    try:
+                        event_type = EventType(event_type_str)
+                    except ValueError:
+                        event_type = EventType.NEWS
+
+                    # Ensure event_time is timezone-aware
+                    if event_time and event_time.tzinfo is None:
+                        event_time = event_time.replace(tzinfo=timezone.utc)
+                    elif event_time is None:
+                        continue
+
+                    # Calculate new decayed alpha
+                    decay_result = calculator.calculate_decay(
+                        alpha_score=original_alpha,
+                        event_type=event_type,
+                        event_time=event_time,
+                        current_time=current_time,
+                    )
+
+                    # Update the event
+                    session.execute(
+                        text("""
+                            UPDATE events
+                            SET alpha_score = :alpha_score,
+                                alpha_original = :alpha_original,
+                                alpha_decay_factor = :decay_factor,
+                                alpha_is_stale = :is_stale,
+                                alpha_age_hours = :age_hours,
+                                updated_at = :updated_at
+                            WHERE id = :event_id
+                        """),
+                        {
+                            "alpha_score": decay_result.decayed_alpha,
+                            "alpha_original": original_alpha,
+                            "decay_factor": decay_result.decay_factor,
+                            "is_stale": decay_result.is_stale,
+                            "age_hours": decay_result.age_hours,
+                            "updated_at": current_time,
+                            "event_id": event_id,
+                        }
+                    )
+
+                    updated += 1
+                    if decay_result.is_stale:
+                        stale_count += 1
+
+                except Exception as e:
+                    logger.warning(
+                        "Failed to update event alpha decay",
+                        event_id=str(row[0]),
+                        error=str(e),
+                    )
+                    errors += 1
+
+            session.commit()
+
+        finally:
+            session.close()
+
+        logger.info(
+            "Alpha decay batch update complete",
+            updated=updated,
+            newly_stale=stale_count,
+            errors=errors,
+        )
+
+        return {
+            "status": "completed",
+            "updated": updated,
+            "newly_stale": stale_count,
+            "errors": errors,
+            "timestamp": current_time.isoformat(),
+        }
+
+    except Exception as e:
+        logger.error("Alpha decay batch update failed", error=str(e))
+        return {
+            "status": "failed",
+            "error": str(e),
+            "updated": updated,
+            "errors": errors + 1,
+        }
+
+
+@celery_app.task
+def get_decayed_alpha(
+    event_id: str,
+) -> dict[str, Any]:
+    """Get the current decayed alpha for a specific event.
+
+    Args:
+        event_id: UUID of the event
+
+    Returns:
+        Current alpha information with decay applied
+    """
+    from backend.storage.timescale import get_sync_db_session
+    from backend.processing.classification import EventType
+    from backend.processing.scoring import AlphaDecayCalculator
+
+    try:
+        session = get_sync_db_session()
+
+        try:
+            from sqlalchemy import text
+
+            result = session.execute(
+                text("""
+                    SELECT event_type, event_time, alpha_score, alpha_original
+                    FROM events
+                    WHERE id = :event_id
+                """),
+                {"event_id": event_id}
+            )
+
+            row = result.fetchone()
+            if not row:
+                return {"error": "Event not found", "event_id": event_id}
+
+            event_type_str = row[0] or "NEWS"
+            event_time = row[1]
+            current_alpha = row[2] or 0
+            original_alpha = row[3] or current_alpha
+
+            try:
+                event_type = EventType(event_type_str)
+            except ValueError:
+                event_type = EventType.NEWS
+
+            # Ensure timezone awareness
+            if event_time and event_time.tzinfo is None:
+                event_time = event_time.replace(tzinfo=timezone.utc)
+
+            # Calculate current decay
+            calculator = AlphaDecayCalculator()
+            decay_result = calculator.calculate_decay(
+                alpha_score=original_alpha,
+                event_type=event_type,
+                event_time=event_time,
+            )
+
+            return {
+                "event_id": event_id,
+                "original_alpha": decay_result.original_alpha,
+                "current_alpha": decay_result.decayed_alpha,
+                "decay_factor": decay_result.decay_factor,
+                "decay_profile": decay_result.decay_profile.value,
+                "age_hours": decay_result.age_hours,
+                "half_life_hours": decay_result.half_life_hours,
+                "is_stale": decay_result.is_stale,
+                "time_to_stale_hours": decay_result.time_to_stale,
+                "details": decay_result.details,
+            }
+
+        finally:
+            session.close()
+
+    except Exception as e:
+        logger.error("Failed to get decayed alpha", event_id=event_id, error=str(e))
+        return {"error": str(e), "event_id": event_id}

@@ -134,11 +134,18 @@ class FinBERTService:
             probabilities=probs_dict,
         )
 
-    def analyze_batch(self, texts: list[str]) -> list[SentimentResult]:
-        """Analyze sentiment of multiple texts.
+    def analyze_batch(
+        self,
+        texts: list[str],
+        batch_size: int = 16,
+    ) -> list[SentimentResult]:
+        """Analyze sentiment of multiple texts efficiently.
+
+        Processes texts in batches to optimize GPU memory usage and throughput.
 
         Args:
             texts: List of texts to analyze
+            batch_size: Number of texts to process at once (default 16)
 
         Returns:
             List of SentimentResults
@@ -150,42 +157,70 @@ class FinBERTService:
 
         import torch
 
-        # Tokenize batch
-        inputs = self._tokenizer(
-            texts,
-            return_tensors="pt",
-            truncation=True,
-            max_length=self.max_length,
-            padding=True,
-        )
-
-        inputs = {k: v.to(self._device) for k, v in inputs.items()}
-
-        # Inference
-        with torch.no_grad():
-            outputs = self._model(**inputs)
-            logits = outputs.logits
-            probs = torch.softmax(logits, dim=1)
-
-        # Convert to results
-        labels = ["positive", "negative", "neutral"]
         results = []
+        labels = ["positive", "negative", "neutral"]
 
-        for i in range(len(texts)):
-            probs_dict = {label: float(probs[i][j]) for j, label in enumerate(labels)}
-            pred_idx = torch.argmax(probs[i]).item()
-            pred_label = labels[pred_idx]
-            confidence = float(probs[i][pred_idx])
-            score = probs_dict["positive"] - probs_dict["negative"]
+        # Process in batches for memory efficiency
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
 
-            results.append(SentimentResult(
-                label=pred_label,
-                score=score,
-                confidence=confidence,
-                probabilities=probs_dict,
-            ))
+            # Tokenize batch
+            inputs = self._tokenizer(
+                batch_texts,
+                return_tensors="pt",
+                truncation=True,
+                max_length=self.max_length,
+                padding=True,
+            )
+
+            inputs = {k: v.to(self._device) for k, v in inputs.items()}
+
+            # Inference
+            with torch.no_grad():
+                outputs = self._model(**inputs)
+                logits = outputs.logits
+                probs = torch.softmax(logits, dim=1)
+
+            # Convert to results
+            for j in range(len(batch_texts)):
+                probs_dict = {label: float(probs[j][k]) for k, label in enumerate(labels)}
+                pred_idx = torch.argmax(probs[j]).item()
+                pred_label = labels[pred_idx]
+                confidence = float(probs[j][pred_idx])
+                score = probs_dict["positive"] - probs_dict["negative"]
+
+                results.append(SentimentResult(
+                    label=pred_label,
+                    score=score,
+                    confidence=confidence,
+                    probabilities=probs_dict,
+                ))
 
         return results
+
+    def analyze_batch_with_ids(
+        self,
+        items: list[tuple[str, str]],
+        batch_size: int = 16,
+    ) -> dict[str, SentimentResult]:
+        """Analyze sentiment of texts with associated IDs.
+
+        Args:
+            items: List of (id, text) tuples
+            batch_size: Number of texts to process at once
+
+        Returns:
+            Dictionary mapping IDs to SentimentResults
+        """
+        if not items:
+            return {}
+
+        ids = [item[0] for item in items]
+        texts = [item[1] for item in items]
+
+        results = self.analyze_batch(texts, batch_size)
+
+        return dict(zip(ids, results))
 
     def analyze_headline(self, headline: str) -> SentimentResult:
         """Analyze sentiment of a headline.
@@ -232,6 +267,22 @@ class SimpleSentimentService:
         "bankruptcy", "bankrupt", "default", "defaults", "defaulted",
         "recall", "recalls", "recalled", "layoff", "layoffs",
     }
+
+    def analyze_batch(
+        self,
+        texts: list[str],
+        batch_size: int = 16,
+    ) -> list[SentimentResult]:
+        """Analyze sentiment of multiple texts.
+
+        Args:
+            texts: List of texts to analyze
+            batch_size: Ignored for simple service (no GPU batching needed)
+
+        Returns:
+            List of SentimentResults
+        """
+        return [self.analyze(text) for text in texts]
 
     def analyze(self, text: str) -> SentimentResult:
         """Analyze sentiment using rules.

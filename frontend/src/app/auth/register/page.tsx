@@ -49,14 +49,14 @@ export default function RegisterPage() {
       await api.register(data.email, data.password, data.full_name);
       setSuccess(true);
       setTimeout(() => {
-        router.push('/auth/login');
+        router.push('/login');
       }, 2000);
     } catch (err) {
       // In mock mode, registration always succeeds
       if (process.env.NEXT_PUBLIC_MOCK_MODE === 'true') {
         setSuccess(true);
         setTimeout(() => {
-          router.push('/auth/login');
+          router.push('/login');
         }, 2000);
         return;
       }
@@ -207,7 +207,7 @@ export default function RegisterPage() {
       <p className="mt-8 text-center text-sm text-text-secondary">
         Already have an account?{' '}
         <Link
-          href="/auth/login"
+          href="/login"
           className="text-accent hover:text-accent-hover font-medium transition-colors link-underline"
         >
           Sign in

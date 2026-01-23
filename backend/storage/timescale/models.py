@@ -118,6 +118,14 @@ class User(Base):
     # Push notifications
     fcm_tokens = Column(JSON, default=list)  # List of FCM device tokens
 
+    # Password reset
+    password_reset_token = Column(String(255), nullable=True, index=True)
+    password_reset_expires = Column(DateTime(timezone=True), nullable=True)
+
+    # Email verification
+    email_verification_token = Column(String(255), nullable=True, index=True)
+    email_verification_expires = Column(DateTime(timezone=True), nullable=True)
+
     # Settings
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
@@ -127,6 +135,7 @@ class User(Base):
     # Relationships
     watchlists = relationship("Watchlist", back_populates="user", cascade="all, delete-orphan")
     alerts = relationship("Alert", back_populates="user", cascade="all, delete-orphan")
+    api_keys = relationship("APIKey", back_populates="user", cascade="all, delete-orphan")
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -170,6 +179,53 @@ class Watchlist(Base):
             "added_at": self.added_at.isoformat() if self.added_at else None,
             "notes": self.notes,
             "alert_enabled": self.alert_enabled,
+        }
+
+
+class APIKey(Base):
+    """API Key model for programmatic access."""
+
+    __tablename__ = "api_keys"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    name = Column(String(255), nullable=False)  # User-provided name for the key
+
+    # Key storage (we store hashed version, prefix for display)
+    key_prefix = Column(String(8), nullable=False)  # First 8 chars for identification
+    key_hash = Column(String(255), nullable=False, unique=True, index=True)
+
+    # Permissions and limits
+    scopes = Column(ARRAY(String), default=["read"])  # Available: read, write, admin
+    rate_limit_override = Column(Integer, nullable=True)  # Custom rate limit, null = use tier default
+
+    # Metadata
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Usage tracking
+    request_count = Column(Integer, default=0)
+    last_ip = Column(String(45), nullable=True)  # IPv6 max length
+
+    # Relationship
+    user = relationship("User", back_populates="api_keys")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary (excludes sensitive data)."""
+        return {
+            "id": str(self.id),
+            "user_id": str(self.user_id),
+            "name": self.name,
+            "key_prefix": self.key_prefix,
+            "scopes": self.scopes,
+            "rate_limit_override": self.rate_limit_override,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "request_count": self.request_count,
         }
 
 

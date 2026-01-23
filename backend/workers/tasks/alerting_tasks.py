@@ -113,36 +113,40 @@ def check_alerts_task(data: dict[str, Any]) -> dict[str, Any]:
 
 @celery_app.task
 def dispatch_alert(alert: dict[str, Any], event_data: dict[str, Any]) -> dict[str, Any]:
-    """Dispatch an alert to users.
+    """Dispatch an alert to users via email and/or push notification.
 
     Args:
-        alert: Alert info including user details
+        alert: Alert info including user details and delivery method
         event_data: Event data that triggered the alert
 
     Returns:
-        Dispatch result
+        Dispatch result with email_sent and push_sent status
     """
     from backend.notifications.email_service import email_service
 
     result = {"email_sent": False, "push_sent": False}
     delivery = alert.get("delivery_method", "email")
     user_email = alert.get("user_email")
+    user_id = alert.get("user_id")
+
+    # Extract event details
+    ticker = event_data.get("ticker", "N/A")
+    headline = event_data.get("headline", "New event")
+    event_type = event_data.get("event_type", "EVENT")
+    direction = event_data.get("direction", "")
+    alpha_score = event_data.get("alpha_score")
+    urgency = event_data.get("urgency_level", "medium")
 
     # Send email notification
     if delivery in ("email", "both") and user_email:
-        ticker = event_data.get("ticker", "N/A")
-        headline = event_data.get("headline", "New event")
-        event_type = event_data.get("event_type", "EVENT")
-        direction = event_data.get("direction", "")
-
         subject = f"[{ticker}] {event_type}: {headline[:50]}"
         html_body = f"""
         <h2>{headline}</h2>
         <p><strong>Ticker:</strong> {ticker}</p>
         <p><strong>Type:</strong> {event_type}</p>
         <p><strong>Direction:</strong> {direction}</p>
-        <p><strong>Alpha Score:</strong> {event_data.get('alpha_score', 'N/A')}</p>
-        <p><a href="{settings.app_url}/events/{event_data.get('id', '')}">View Details</a></p>
+        <p><strong>Alpha Score:</strong> {alpha_score if alpha_score else 'N/A'}</p>
+        <p><a href="{settings.app_url}/dashboard/ticker/{ticker}">View Details</a></p>
         """
 
         result["email_sent"] = email_service.send_email(
@@ -151,9 +155,45 @@ def dispatch_alert(alert: dict[str, Any], event_data: dict[str, Any]) -> dict[st
             html_body=html_body,
         )
 
+    # Send push notification
+    if delivery in ("push", "both") and user_id:
+        # Format notification title based on direction
+        direction_emoji = ""
+        if direction == "BULLISH":
+            direction_emoji = "+"
+        elif direction == "BEARISH":
+            direction_emoji = "-"
+
+        push_title = f"{ticker} {direction_emoji} {event_type}"
+        push_body = headline[:200]  # Truncate for push notification
+
+        # Build data payload for the notification
+        push_data = {
+            "type": "alert",
+            "eventId": event_data.get("id", ""),
+            "ticker": ticker,
+            "alertId": alert.get("alert_id", ""),
+            "eventType": event_type,
+            "direction": direction,
+            "alphaScore": str(alpha_score) if alpha_score else "",
+            "urgency": urgency,
+            "url": f"/dashboard/ticker/{ticker}",
+        }
+
+        # Queue push notification task
+        send_push_notification_task.delay(
+            user_id=user_id,
+            title=push_title,
+            body=push_body,
+            data=push_data,
+        )
+        result["push_sent"] = True  # Task queued (actual delivery async)
+
     logger.info(
         "Alert dispatched",
         alert_id=alert.get("alert_id"),
+        user_id=user_id,
+        delivery_method=delivery,
         email_sent=result.get("email_sent"),
         push_sent=result.get("push_sent"),
     )
@@ -229,7 +269,7 @@ def send_email_alert(
     body: str,
     event_data: dict[str, Any],
 ) -> dict[str, Any]:
-    """Send email alert to user.
+    """Send email alert to user (legacy - use send_email_alert_task instead).
 
     Args:
         user_email: User email address
@@ -263,24 +303,191 @@ def send_email_alert(
     }
 
 
-@celery_app.task
-def send_push_notification(
+@celery_app.task(bind=True, max_retries=3)
+def send_email_alert_task(
+    self,
+    user_email: str,
+    event_data: dict[str, Any],
+    user_name: str | None = None,
+) -> dict[str, Any]:
+    """Send email alert notification for an event.
+
+    This task sends a professional HTML email alert with event details including
+    ticker, headline, sentiment, alpha score, and other relevant information.
+    Includes plain text fallback for email clients that don't support HTML.
+
+    Args:
+        user_email: Recipient email address
+        event_data: Event data dictionary containing:
+            - ticker: Stock ticker symbol
+            - headline: Event headline
+            - event_type: Type of event (e.g., "INSIDER_TRADE")
+            - sentiment_label: Sentiment classification
+            - alpha_score: Calculated alpha score
+            - direction: Signal direction (BULLISH/BEARISH/NEUTRAL)
+            - urgency_level: Urgency level (critical/high/medium/low)
+            - id or event_id: Event ID for deep linking
+            - source_name: Source of the event
+            - event_time: Time of the event
+        user_name: Optional user name for personalization
+
+    Returns:
+        Dict with send result including:
+            - sent: Boolean indicating success
+            - to: Recipient email
+            - subject: Email subject used
+            - sent_at: Timestamp of send attempt
+            - error: Error message if failed
+
+    Raises:
+        Retries up to 3 times on transient failures with exponential backoff.
+    """
+    from backend.notifications.email_service import email_service
+    from backend.notifications.email_templates import (
+        render_alert_email_html,
+        render_alert_email_text,
+        render_alert_subject,
+    )
+
+    try:
+        # Extract event details
+        ticker = event_data.get("ticker", "UNKNOWN")
+        headline = event_data.get("headline") or event_data.get("title", "No headline available")
+        event_type = event_data.get("event_type", "EVENT")
+        sentiment_label = event_data.get("sentiment_label")
+        alpha_score = event_data.get("alpha_score", 0.0)
+        direction = event_data.get("direction", "NEUTRAL")
+        urgency_level = event_data.get("urgency_level", "low")
+        event_id = event_data.get("id") or event_data.get("event_id")
+        source_name = event_data.get("source_name") or event_data.get("source")
+
+        # Parse event time
+        event_time = None
+        raw_time = event_data.get("event_time") or event_data.get("filing_time")
+        if raw_time:
+            if isinstance(raw_time, datetime):
+                event_time = raw_time
+            elif isinstance(raw_time, str):
+                try:
+                    event_time = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    pass
+
+        # Generate email content using templates
+        subject = render_alert_subject(
+            ticker=ticker,
+            event_type=event_type,
+            direction=direction,
+            urgency_level=urgency_level,
+        )
+
+        html_body = render_alert_email_html(
+            ticker=ticker,
+            headline=headline,
+            event_type=event_type,
+            sentiment_label=sentiment_label,
+            alpha_score=alpha_score,
+            direction=direction,
+            urgency_level=urgency_level,
+            event_id=str(event_id) if event_id else None,
+            source_name=source_name,
+            event_time=event_time,
+        )
+
+        text_body = render_alert_email_text(
+            ticker=ticker,
+            headline=headline,
+            event_type=event_type,
+            sentiment_label=sentiment_label,
+            alpha_score=alpha_score,
+            direction=direction,
+            urgency_level=urgency_level,
+            event_id=str(event_id) if event_id else None,
+            source_name=source_name,
+            event_time=event_time,
+        )
+
+        # Send the email
+        sent = email_service.send_email(
+            to_email=user_email,
+            subject=subject,
+            html_body=html_body,
+            text_body=text_body,
+        )
+
+        logger.info(
+            "Email alert task completed",
+            to=user_email,
+            ticker=ticker,
+            event_type=event_type,
+            direction=direction,
+            sent=sent,
+        )
+
+        return {
+            "sent": sent,
+            "to": user_email,
+            "subject": subject,
+            "ticker": ticker,
+            "event_type": event_type,
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(
+            "Failed to send email alert",
+            to=user_email,
+            ticker=event_data.get("ticker"),
+            error=str(e),
+            retry_count=self.request.retries,
+        )
+        # Retry with exponential backoff
+        raise self.retry(exc=e, countdown=10 * (self.request.retries + 1))
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_push_notification_task(
+    self,
     user_id: str,
     title: str,
     body: str,
     data: dict[str, Any] | None = None,
+    image: str | None = None,
 ) -> dict[str, Any]:
-    """Send push notification to user.
+    """Send push notification to user via Firebase Cloud Messaging.
+
+    This task sends push notifications to all registered FCM tokens for a user.
+    It handles token validation, batch sending, and automatic cleanup of
+    invalid tokens.
 
     Args:
-        user_id: User ID
-        title: Notification title
-        body: Notification body
-        data: Additional data payload
+        user_id: User ID (UUID as string)
+        title: Notification title (max 100 chars recommended)
+        body: Notification body (max 1000 chars recommended)
+        data: Additional data payload (will be delivered as-is to the client)
+        image: Optional image URL for the notification
 
     Returns:
-        Send result
+        Send result with success/failure counts
+
+    Notification payload structure:
+        {
+            "notification": {
+                "title": "Event Alert",
+                "body": "AAPL: New SEC filing detected",
+                "image": "https://..."
+            },
+            "data": {
+                "type": "event|alert|digest|system",
+                "eventId": "uuid",
+                "ticker": "AAPL",
+                "alertId": "uuid",
+                "url": "/dashboard/ticker/AAPL",
+                "urgency": "critical|high|medium|low"
+            }
+        }
     """
+    import httpx
     from backend.storage.timescale.connection import get_sync_db_context
     from backend.storage.timescale.models import User
     from sqlalchemy import select
@@ -291,6 +498,15 @@ def send_push_notification(
         title=title,
     )
 
+    # Check if FCM is configured
+    if not settings.push_notifications_configured:
+        logger.warning("Push notifications not configured - skipping")
+        return {
+            "sent": False,
+            "reason": "FCM not configured",
+            "user_id": user_id,
+        }
+
     try:
         # Get user FCM tokens
         with get_sync_db_context() as session:
@@ -299,21 +515,269 @@ def send_push_notification(
             )
             user = result.scalar_one_or_none()
 
-            if not user or not user.fcm_tokens:
-                return {"sent": False, "reason": "No FCM tokens"}
+            if not user:
+                return {
+                    "sent": False,
+                    "reason": "User not found",
+                    "user_id": user_id,
+                }
 
-        # Firebase push would go here
-        # For now, just log and return success
-        return {
-            "sent": True,
+            if not user.fcm_tokens:
+                return {
+                    "sent": False,
+                    "reason": "No FCM tokens registered",
+                    "user_id": user_id,
+                }
+
+            # Extract tokens from stored format
+            tokens = []
+            for token_entry in user.fcm_tokens:
+                if isinstance(token_entry, dict):
+                    tokens.append(token_entry.get("token"))
+                elif isinstance(token_entry, str):
+                    tokens.append(token_entry)
+
+            tokens = [t for t in tokens if t]  # Filter out None/empty
+
+            if not tokens:
+                return {
+                    "sent": False,
+                    "reason": "No valid FCM tokens",
+                    "user_id": user_id,
+                }
+
+        # Build FCM message payload
+        notification_payload = {
+            "title": title[:100],  # FCM has limits
+            "body": body[:1000],
+        }
+        if image:
+            notification_payload["image"] = image
+
+        data_payload = data or {}
+        # Ensure all data values are strings (FCM requirement)
+        data_payload = {k: str(v) if v is not None else "" for k, v in data_payload.items()}
+
+        # Send to each token
+        success_count = 0
+        failure_count = 0
+        invalid_tokens = []
+
+        # Use FCM HTTP v1 API
+        fcm_url = f"https://fcm.googleapis.com/v1/projects/{settings.fcm_project_id}/messages:send"
+
+        # Get access token for FCM
+        # Note: In production, use service account authentication
+        # For simplicity, we're using the legacy server key approach
+        headers = {
+            "Authorization": f"key={settings.fcm_server_key}",
+            "Content-Type": "application/json",
+        }
+
+        # Use legacy HTTP protocol for simplicity
+        legacy_fcm_url = "https://fcm.googleapis.com/fcm/send"
+
+        with httpx.Client(timeout=30.0) as client:
+            for token in tokens:
+                try:
+                    message = {
+                        "to": token,
+                        "notification": notification_payload,
+                        "data": data_payload,
+                        # Android-specific options
+                        "android": {
+                            "priority": "high",
+                            "notification": {
+                                "click_action": "OPEN_APP",
+                                "channel_id": "alerts",
+                            },
+                        },
+                        # Web push options
+                        "webpush": {
+                            "headers": {
+                                "Urgency": "high",
+                            },
+                            "notification": {
+                                "icon": "/icons/notification-icon.png",
+                                "badge": "/icons/badge-icon.png",
+                                "requireInteraction": data_payload.get("urgency") in ("critical", "high"),
+                            },
+                            "fcm_options": {
+                                "link": data_payload.get("url", "/dashboard"),
+                            },
+                        },
+                    }
+
+                    response = client.post(
+                        legacy_fcm_url,
+                        json=message,
+                        headers=headers,
+                    )
+
+                    if response.status_code == 200:
+                        response_data = response.json()
+                        if response_data.get("success", 0) > 0:
+                            success_count += 1
+                        else:
+                            failure_count += 1
+                            # Check for invalid token errors
+                            results = response_data.get("results", [])
+                            if results and results[0].get("error") in (
+                                "NotRegistered",
+                                "InvalidRegistration",
+                            ):
+                                invalid_tokens.append(token)
+                    else:
+                        logger.warning(
+                            "FCM request failed",
+                            status_code=response.status_code,
+                            response=response.text[:200],
+                        )
+                        failure_count += 1
+
+                except Exception as e:
+                    logger.warning(
+                        "Failed to send to FCM token",
+                        error=str(e),
+                    )
+                    failure_count += 1
+
+        # Clean up invalid tokens
+        if invalid_tokens:
+            cleanup_invalid_fcm_tokens.delay(user_id, invalid_tokens)
+
+        result = {
+            "sent": success_count > 0,
             "user_id": user_id,
             "title": title,
+            "success_count": success_count,
+            "failure_count": failure_count,
+            "total_tokens": len(tokens),
             "sent_at": datetime.now(timezone.utc).isoformat(),
         }
 
+        logger.info(
+            "Push notification result",
+            **result,
+        )
+
+        return result
+
     except Exception as e:
-        logger.error("Push notification failed", error=str(e))
-        return {"sent": False, "error": str(e)}
+        logger.error("Push notification failed", error=str(e), user_id=user_id)
+        # Retry on transient errors
+        try:
+            self.retry(exc=e)
+        except self.MaxRetriesExceededError:
+            pass
+        return {
+            "sent": False,
+            "error": str(e),
+            "user_id": user_id,
+        }
+
+
+@celery_app.task
+def cleanup_invalid_fcm_tokens(user_id: str, invalid_tokens: list[str]) -> dict[str, Any]:
+    """Remove invalid FCM tokens from user's registered tokens.
+
+    Args:
+        user_id: User ID
+        invalid_tokens: List of tokens to remove
+
+    Returns:
+        Cleanup result
+    """
+    from backend.storage.timescale.connection import get_sync_db_context
+    from backend.storage.timescale.models import User
+    from sqlalchemy import select
+
+    try:
+        with get_sync_db_context() as session:
+            result = session.execute(
+                select(User).where(User.id == user_id)
+            )
+            user = result.scalar_one_or_none()
+
+            if not user or not user.fcm_tokens:
+                return {"cleaned": 0, "user_id": user_id}
+
+            # Filter out invalid tokens
+            original_count = len(user.fcm_tokens)
+            new_tokens = []
+
+            for token_entry in user.fcm_tokens:
+                if isinstance(token_entry, dict):
+                    if token_entry.get("token") not in invalid_tokens:
+                        new_tokens.append(token_entry)
+                elif isinstance(token_entry, str):
+                    if token_entry not in invalid_tokens:
+                        new_tokens.append(token_entry)
+
+            user.fcm_tokens = new_tokens
+            session.commit()
+
+            cleaned = original_count - len(new_tokens)
+
+            logger.info(
+                "Cleaned invalid FCM tokens",
+                user_id=user_id,
+                cleaned=cleaned,
+                remaining=len(new_tokens),
+            )
+
+            return {
+                "cleaned": cleaned,
+                "remaining": len(new_tokens),
+                "user_id": user_id,
+            }
+
+    except Exception as e:
+        logger.error("Failed to cleanup FCM tokens", error=str(e), user_id=user_id)
+        return {"cleaned": 0, "error": str(e), "user_id": user_id}
+
+
+@celery_app.task
+def send_bulk_push_notifications(
+    user_ids: list[str],
+    title: str,
+    body: str,
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Send push notifications to multiple users.
+
+    This task dispatches individual notification tasks for each user,
+    allowing for parallel processing and better error isolation.
+
+    Args:
+        user_ids: List of user IDs
+        title: Notification title
+        body: Notification body
+        data: Additional data payload
+
+    Returns:
+        Dispatch result
+    """
+    dispatched = 0
+    for user_id in user_ids:
+        send_push_notification_task.delay(
+            user_id=user_id,
+            title=title,
+            body=body,
+            data=data,
+        )
+        dispatched += 1
+
+    logger.info(
+        "Bulk push notifications dispatched",
+        dispatched=dispatched,
+        title=title,
+    )
+
+    return {
+        "dispatched": dispatched,
+        "dispatched_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @celery_app.task

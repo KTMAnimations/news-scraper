@@ -2,12 +2,24 @@
 
 import { useSession, signOut } from 'next-auth/react';
 import Link from 'next/link';
-import { Bell, Search, LogOut, Settings, ChevronDown } from 'lucide-react';
-import { useState } from 'react';
+import { Bell, Search, LogOut, Settings, ChevronDown, Sun, Moon, Monitor } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useTheme } from 'next-themes';
+import { ConnectionStatus } from './ConnectionStatus';
 
 export function Header() {
   const { data: session } = useSession();
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showThemeMenu, setShowThemeMenu] = useState(false);
+  const { theme, setTheme, resolvedTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  // Avoid hydration mismatch
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const ThemeIcon = mounted ? (resolvedTheme === 'dark' ? Moon : Sun) : Monitor;
 
   return (
     <header className="sticky top-0 z-50 bg-bg-elevated/80 backdrop-blur-xl border-b border-border">
@@ -38,10 +50,62 @@ export function Header() {
 
         {/* Right side */}
         <div className="flex items-center gap-2">
-          {/* Live indicator */}
-          <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-positive-subtle rounded-full mr-2">
-            <div className="live-dot" />
-            <span className="text-xs font-medium text-positive">Live</span>
+          {/* WebSocket Connection Status Indicator */}
+          <div className="hidden md:block mr-2">
+            <ConnectionStatus showLabel={true} showReconnectInfo={true} />
+          </div>
+          {/* Compact version for mobile */}
+          <div className="block md:hidden mr-1">
+            <ConnectionStatus compact={true} />
+          </div>
+
+          {/* Theme toggle */}
+          <div className="relative">
+            <button
+              onClick={() => setShowThemeMenu(!showThemeMenu)}
+              className="p-2.5 text-text-tertiary hover:text-text-primary hover:bg-hover rounded-lg transition-colors"
+              aria-label="Toggle theme"
+            >
+              <ThemeIcon className="h-5 w-5" />
+            </button>
+
+            {showThemeMenu && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setShowThemeMenu(false)}
+                />
+                <div className="absolute right-0 mt-2 w-40 bg-bg-elevated border border-border rounded-xl shadow-lg z-20 py-1 overflow-hidden animate-scale-in">
+                  <button
+                    onClick={() => { setTheme('light'); setShowThemeMenu(false); }}
+                    className={`w-full flex items-center px-4 py-2.5 text-sm transition-colors ${
+                      theme === 'light' ? 'text-accent bg-accent-subtle' : 'text-text-secondary hover:text-text-primary hover:bg-hover'
+                    }`}
+                  >
+                    <Sun className="h-4 w-4 mr-3" />
+                    Light
+                  </button>
+                  <button
+                    onClick={() => { setTheme('dark'); setShowThemeMenu(false); }}
+                    className={`w-full flex items-center px-4 py-2.5 text-sm transition-colors ${
+                      theme === 'dark' ? 'text-accent bg-accent-subtle' : 'text-text-secondary hover:text-text-primary hover:bg-hover'
+                    }`}
+                  >
+                    <Moon className="h-4 w-4 mr-3" />
+                    Dark
+                  </button>
+                  <button
+                    onClick={() => { setTheme('system'); setShowThemeMenu(false); }}
+                    className={`w-full flex items-center px-4 py-2.5 text-sm transition-colors ${
+                      theme === 'system' ? 'text-accent bg-accent-subtle' : 'text-text-secondary hover:text-text-primary hover:bg-hover'
+                    }`}
+                  >
+                    <Monitor className="h-4 w-4 mr-3" />
+                    System
+                  </button>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Notifications */}

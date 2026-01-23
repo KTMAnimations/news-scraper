@@ -20,6 +20,9 @@ class ExtractedEntities:
     percentages: list[str] = field(default_factory=list)
     dates: list[str] = field(default_factory=list)
     locations: list[str] = field(default_factory=list)
+    # Disambiguation metadata
+    ticker_confidences: dict[str, float] = field(default_factory=dict)
+    ticker_sources: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -31,6 +34,8 @@ class ExtractedEntities:
             "percentages": self.percentages,
             "dates": self.dates,
             "locations": self.locations,
+            "ticker_confidences": self.ticker_confidences,
+            "ticker_sources": self.ticker_sources,
         }
 
 
@@ -45,6 +50,9 @@ class EntityExtractor:
         r"(?:NYSE|NASDAQ|OTC|OTCQB|OTCQX|TSX|AMEX)[:\s]*([A-Z]{1,5})\b",
         re.IGNORECASE,
     )
+
+    # Standalone uppercase words that could be tickers (2-5 letters)
+    POTENTIAL_TICKER_PATTERN = re.compile(r"\b([A-Z]{2,5})\b")
 
     # Money pattern
     MONEY_PATTERN = re.compile(
@@ -64,18 +72,36 @@ class EntityExtractor:
         "USD", "CAD", "EUR", "GBP", "THE", "AND", "FOR", "NEW", "INC",
         "LLC", "CORP", "AI", "EV", "TV", "PC", "IT", "PR", "IR",
         "CEO", "CTO", "CFO", "COO", "CMO", "CIO", "CISO",
+        # Common words/acronyms that aren't tickers
+        "ARE", "BE", "CAN", "DO", "HAS", "IS", "IT", "MAY", "OF",
+        "ON", "OR", "SO", "TO", "UP", "WAS", "ALL", "ANY", "BUT",
+        "GET", "GOT", "HAD", "HER", "HIM", "HIS", "HOW", "ITS", "LET",
+        "NOT", "NOW", "OLD", "OUR", "OUT", "OWN", "PUT", "SAY", "SHE",
+        "THE", "TOO", "TRY", "TWO", "USE", "WAY", "WHO", "YES", "YET",
+        "BIG", "ONE", "TWO", "TEN", "TOP", "LOW", "NET", "OTC", "ATM",
     }
 
-    def __init__(self, use_spacy: bool = True, model_name: str = "en_core_web_sm"):
+    def __init__(
+        self,
+        use_spacy: bool = True,
+        model_name: str = "en_core_web_sm",
+        knowledge_base=None,
+        use_disambiguation: bool = True,
+    ):
         """Initialize entity extractor.
 
         Args:
             use_spacy: Whether to use spaCy NER
             model_name: spaCy model to load
+            knowledge_base: Optional TickerKnowledgeBase for validation
+            use_disambiguation: Whether to use ticker disambiguation
         """
         self.use_spacy = use_spacy
         self.model_name = model_name
+        self.kb = knowledge_base
+        self.use_disambiguation = use_disambiguation
         self._nlp = None
+        self._disambiguator = None
 
     def _get_nlp(self):
         """Lazy load spaCy model."""
@@ -97,6 +123,19 @@ class EntityExtractor:
 
         return self._nlp
 
+    def _get_disambiguator(self):
+        """Lazy load ticker disambiguator."""
+        if self._disambiguator is None and self.use_disambiguation:
+            try:
+                from .ticker_disambiguator import TickerDisambiguator
+                self._disambiguator = TickerDisambiguator(self.kb)
+                logger.debug("Loaded ticker disambiguator")
+            except ImportError:
+                logger.warning("Ticker disambiguator not available")
+                self.use_disambiguation = False
+
+        return self._disambiguator
+
     def extract(self, text: str) -> ExtractedEntities:
         """Extract entities from text.
 
@@ -108,8 +147,8 @@ class EntityExtractor:
         """
         entities = ExtractedEntities()
 
-        # Extract tickers (always use regex for these)
-        entities.tickers = self._extract_tickers(text)
+        # Extract raw ticker candidates (always use regex for these)
+        raw_tickers = self._extract_tickers(text)
 
         # Extract money amounts
         entities.money = self._extract_money(text)
@@ -139,6 +178,27 @@ class EntityExtractor:
         entities.people = list(dict.fromkeys(entities.people))[:20]
         entities.dates = list(dict.fromkeys(entities.dates))[:10]
         entities.locations = list(dict.fromkeys(entities.locations))[:10]
+
+        # Apply ticker disambiguation if enabled
+        disambiguator = self._get_disambiguator()
+        if disambiguator and self.use_disambiguation:
+            disambiguated = disambiguator.disambiguate(
+                text,
+                raw_tickers,
+                entities.companies,
+            )
+
+            # Filter by confidence threshold and extract final tickers
+            confidence_threshold = 0.5
+            for d in disambiguated:
+                if d.confidence >= confidence_threshold:
+                    if d.ticker not in entities.tickers:
+                        entities.tickers.append(d.ticker)
+                    entities.ticker_confidences[d.ticker] = d.confidence
+                    entities.ticker_sources[d.ticker] = d.disambiguation_reason
+        else:
+            # No disambiguation - use raw tickers
+            entities.tickers = raw_tickers
 
         return entities
 
