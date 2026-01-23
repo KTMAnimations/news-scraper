@@ -98,7 +98,8 @@ def scrape_social(self) -> dict[str, Any]:
         Dictionary with scrape results
     """
     async def _scrape():
-        from backend.ingestion.social import RedditMonitor, StockTwitsClient
+        from backend.ingestion.social import RedditMonitor, StockTwitsClient, TwitterStream
+        from backend.config import settings
 
         results = {"mentions": [], "error": None}
 
@@ -117,6 +118,17 @@ def scrape_social(self) -> dict[str, Any]:
                 posts = await reddit.get_subreddit_posts("pennystocks", limit=25)
                 results["mentions"].extend(posts)
 
+            # Scrape Twitter if bearer token is configured
+            if settings.twitter_bearer_token:
+                try:
+                    async with TwitterStream() as twitter:
+                        # Search recent tweets for trending tickers
+                        for ticker in tickers[:5]:
+                            tweets = await twitter.search_recent(ticker, limit=10)
+                            results["mentions"].extend(tweets)
+                except Exception as twitter_error:
+                    logger.warning("Twitter scraping failed", error=str(twitter_error))
+
             results["count"] = len(results["mentions"])
 
             # Publish each mention for processing
@@ -127,6 +139,51 @@ def scrape_social(self) -> dict[str, Any]:
             logger.error("Social scraping failed", error=str(e))
             results["error"] = str(e)
             raise self.retry(exc=e, countdown=120)
+
+        return results
+
+    return run_async(_scrape())
+
+
+@celery_app.task(bind=True, max_retries=2)
+def scrape_twitter_stream(self, tickers: list[str] | None = None) -> dict[str, Any]:
+    """Scrape Twitter for cashtag mentions.
+
+    Args:
+        tickers: Optional list of tickers to track
+
+    Returns:
+        Dictionary with scrape results
+    """
+    async def _scrape():
+        from backend.ingestion.social import TwitterStream
+        from backend.config import settings
+
+        results = {"tweets": [], "error": None}
+
+        if not settings.twitter_bearer_token:
+            results["error"] = "Twitter bearer token not configured"
+            return results
+
+        try:
+            async with TwitterStream() as twitter:
+                # Default to some popular penny stock tickers if none provided
+                target_tickers = tickers or ["MULN", "BBIG", "ATER", "PROG", "CEI"]
+
+                for ticker in target_tickers[:10]:
+                    tweets = await twitter.search_recent(ticker, limit=20)
+                    results["tweets"].extend(tweets)
+
+            results["count"] = len(results["tweets"])
+
+            # Publish each tweet for processing
+            for tweet in results["tweets"]:
+                process_social_mention.delay(tweet)
+
+        except Exception as e:
+            logger.error("Twitter scraping failed", error=str(e))
+            results["error"] = str(e)
+            raise self.retry(exc=e, countdown=300)
 
         return results
 

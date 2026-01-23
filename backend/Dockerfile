@@ -5,10 +5,11 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/app
 
-# Set work directory
-WORKDIR /app
+# Set work directory - backend code will be mounted at /app/backend
+WORKDIR /app/backend
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -26,8 +27,8 @@ RUN pip install --upgrade pip && \
 # Download spaCy model
 RUN python -m spacy download en_core_web_sm
 
-# Copy application code
-COPY . .
+# Copy application code into backend subdirectory
+COPY . /app/backend
 
 # Create non-root user
 RUN adduser --disabled-password --gecos '' appuser && \

@@ -33,9 +33,10 @@ class Event(Base):
 
     __tablename__ = "events"
 
+    # Composite primary key required for TimescaleDB hypertable
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    ticker = Column(String(10), nullable=False, index=True)
-    event_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    event_time = Column(DateTime(timezone=True), primary_key=True, nullable=False, index=True)
+    ticker = Column(String(10), index=True)
     ingest_time = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
     # Classification
@@ -63,8 +64,8 @@ class Event(Base):
     extracted_people = Column(ARRAY(String))
     extracted_amounts = Column(JSON)
 
-    # Metadata
-    metadata = Column(JSON, default=dict)
+    # Extra metadata (named 'extra_data' to avoid SQLAlchemy reserved 'metadata')
+    extra_data = Column("metadata", JSON, default=dict)
 
     # Indexes for common queries
     __table_args__ = (
@@ -94,7 +95,7 @@ class Event(Base):
             "direction": self.direction,
             "urgency_level": self.urgency_level,
             "extracted_tickers": self.extracted_tickers,
-            "metadata": self.metadata,
+            "metadata": self.extra_data,
         }
 
 
@@ -113,6 +114,9 @@ class User(Base):
     subscription_status = Column(String(50), default="active")
     stripe_customer_id = Column(String(255))
     stripe_subscription_id = Column(String(255))
+
+    # Push notifications
+    fcm_tokens = Column(JSON, default=list)  # List of FCM device tokens
 
     # Settings
     is_active = Column(Boolean, default=True)

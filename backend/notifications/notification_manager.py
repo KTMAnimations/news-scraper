@@ -256,14 +256,119 @@ class NotificationManager:
             logger.debug("Push notifications not configured")
             return False
 
-        # Push notification implementation would go here
-        # Using Firebase Cloud Messaging or similar service
-        logger.info(
-            "Push notification would be sent",
-            user_id=user_id,
-            ticker=ticker,
-        )
-        return False
+        try:
+            # Lazy import Firebase Admin SDK
+            import firebase_admin
+            from firebase_admin import credentials, messaging
+
+            # Initialize Firebase app if not already done
+            if not firebase_admin._apps:
+                # Use service account credentials from environment or file
+                if settings.fcm_project_id:
+                    cred = credentials.Certificate({
+                        "type": "service_account",
+                        "project_id": settings.fcm_project_id,
+                        "private_key_id": "",
+                        "private_key": settings.fcm_server_key.replace("\\n", "\n"),
+                        "client_email": f"firebase-adminsdk@{settings.fcm_project_id}.iam.gserviceaccount.com",
+                        "client_id": "",
+                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                        "token_uri": "https://oauth2.googleapis.com/token",
+                    })
+                    firebase_admin.initialize_app(cred)
+
+            # Fetch user's FCM tokens from database
+            result = await self.session.execute(
+                select(User).where(User.id == user_id)
+            )
+            user = result.scalar_one_or_none()
+
+            if not user or not user.fcm_tokens:
+                logger.debug("No FCM tokens for user", user_id=user_id)
+                return False
+
+            # Get direction emoji and color
+            direction_emoji = {"BULLISH": "🟢", "BEARISH": "🔴", "NEUTRAL": "⚪"}.get(direction, "⚪")
+
+            # Build notification
+            title = f"{direction_emoji} {ticker}: {event_type}"
+            body = headline[:200] if len(headline) > 200 else headline
+
+            # Send to all user's registered devices
+            tokens = user.fcm_tokens if isinstance(user.fcm_tokens, list) else []
+            if not tokens:
+                return False
+
+            success_count = 0
+            failed_tokens = []
+
+            for token in tokens:
+                try:
+                    message = messaging.Message(
+                        notification=messaging.Notification(
+                            title=title,
+                            body=body,
+                        ),
+                        data={
+                            "ticker": ticker,
+                            "event_type": event_type,
+                            "direction": direction,
+                            "click_action": f"{settings.app_url}/dashboard?ticker={ticker}",
+                        },
+                        token=token,
+                        android=messaging.AndroidConfig(
+                            priority="high",
+                            notification=messaging.AndroidNotification(
+                                icon="stock_icon",
+                                color="#10B981" if direction == "BULLISH" else "#EF4444" if direction == "BEARISH" else "#6B7280",
+                            ),
+                        ),
+                        apns=messaging.APNSConfig(
+                            payload=messaging.APNSPayload(
+                                aps=messaging.Aps(
+                                    alert=messaging.ApsAlert(
+                                        title=title,
+                                        body=body,
+                                    ),
+                                    sound="default",
+                                    badge=1,
+                                ),
+                            ),
+                        ),
+                    )
+
+                    response = messaging.send(message)
+                    logger.debug("Push notification sent", response=response, token=token[:20] + "...")
+                    success_count += 1
+
+                except messaging.UnregisteredError:
+                    # Token is no longer valid, mark for removal
+                    failed_tokens.append(token)
+                    logger.debug("FCM token unregistered", token=token[:20] + "...")
+
+                except Exception as e:
+                    logger.warning("Failed to send push notification", error=str(e), token=token[:20] + "...")
+
+            # Remove invalid tokens
+            if failed_tokens:
+                updated_tokens = [t for t in tokens if t not in failed_tokens]
+                await self.session.execute(
+                    update(User)
+                    .where(User.id == user_id)
+                    .values(fcm_tokens=updated_tokens)
+                )
+                await self.session.commit()
+                logger.info("Removed invalid FCM tokens", count=len(failed_tokens), user_id=user_id)
+
+            return success_count > 0
+
+        except ImportError:
+            logger.warning("Firebase Admin SDK not installed")
+            return False
+
+        except Exception as e:
+            logger.error("Push notification error", error=str(e), user_id=user_id)
+            return False
 
     async def publish_to_websocket(self, event_data: dict[str, Any]) -> bool:
         """Publish event to WebSocket via Redis pub/sub.

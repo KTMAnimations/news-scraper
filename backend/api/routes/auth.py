@@ -2,9 +2,9 @@
 
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr
 
 from backend.api.dependencies import CurrentUser, DBSession
@@ -13,9 +13,6 @@ from backend.storage.timescale.models import User
 from backend.storage.timescale.queries import UserQueries
 
 router = APIRouter()
-
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 # Request/Response models
@@ -96,12 +93,16 @@ def create_refresh_token(user_id: str) -> str:
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify password against hash."""
-    return pwd_context.verify(plain_password, hashed_password)
+    return bcrypt.checkpw(
+        plain_password.encode("utf-8"),
+        hashed_password.encode("utf-8")
+    )
 
 
 def get_password_hash(password: str) -> str:
     """Hash password."""
-    return pwd_context.hash(password)
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
 
 @router.post("/register", response_model=UserResponse)

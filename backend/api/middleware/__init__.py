@@ -1,5 +1,5 @@
-"""API middleware module."""
+"""API middleware modules."""
 
-from .rate_limiter import RateLimitMiddleware, rate_limit_dependency
+from backend.api.middleware.rate_limiter import RateLimitMiddleware
 
-__all__ = ["RateLimitMiddleware", "rate_limit_dependency"]
+__all__ = ["RateLimitMiddleware"]

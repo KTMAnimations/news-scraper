@@ -224,7 +224,7 @@ class EntityExtractor:
                 return float(numeric_match.group()) * multiplier
 
         except (ValueError, AttributeError) as e:
-            logger.debug("Failed to parse money value", raw=money_str, error=str(e))
+            logger.debug("Failed to parse money value", raw=text, error=str(e))
 
         return None
 

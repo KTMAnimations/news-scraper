@@ -96,7 +96,7 @@
   }
 
   .badge-neutral {
-    @apply bg-neutral-light text-neutral-dark dark:bg-neutral-dark/20 dark:text-neutral;
+    @apply bg-neutral-custom-light text-neutral-custom-dark dark:bg-neutral-custom-dark/20 dark:text-neutral-custom;
   }
 
   /* Alpha score gradient */

@@ -1,6 +1,5 @@
-"""OpenSearch integration module."""
+"""OpenSearch storage module."""
 
-from .client import OpenSearchClient
-from .indexer import EventIndexer
+from backend.storage.opensearch.client import OpenSearchClient, opensearch_client
 
-__all__ = ["OpenSearchClient", "EventIndexer"]
+__all__ = ["OpenSearchClient", "opensearch_client"]
