@@ -456,6 +456,47 @@ class ApiClient {
       method: 'POST',
     });
   }
+
+  // Stats endpoint
+  async getStats() {
+    if (MOCK_MODE) {
+      // Calculate from mock events
+      const now = Date.now();
+      const today = mockEvents.filter(
+        (e) => new Date(e.event_time).getTime() > now - 24 * 60 * 60 * 1000
+      );
+      return {
+        total_events: today.length,
+        total_events_yesterday: Math.floor(today.length * 0.9),
+        bullish_events: today.filter((e) => e.direction === 'BULLISH').length,
+        bullish_events_yesterday: Math.floor(
+          today.filter((e) => e.direction === 'BULLISH').length * 0.92
+        ),
+        bearish_events: today.filter((e) => e.direction === 'BEARISH').length,
+        bearish_events_yesterday: Math.floor(
+          today.filter((e) => e.direction === 'BEARISH').length * 1.05
+        ),
+        high_alpha_events: today.filter(
+          (e) => Math.abs(e.alpha_score || 0) >= 0.7
+        ).length,
+        high_alpha_events_last_hour: today.filter(
+          (e) =>
+            Math.abs(e.alpha_score || 0) >= 0.7 &&
+            new Date(e.event_time).getTime() > now - 60 * 60 * 1000
+        ).length,
+      };
+    }
+    return this.request<{
+      total_events: number;
+      total_events_yesterday: number;
+      bullish_events: number;
+      bullish_events_yesterday: number;
+      bearish_events: number;
+      bearish_events_yesterday: number;
+      high_alpha_events: number;
+      high_alpha_events_last_hour: number;
+    }>('/api/v1/stats');
+  }
 }
 
 export const api = new ApiClient(API_URL);

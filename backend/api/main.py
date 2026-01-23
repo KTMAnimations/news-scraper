@@ -67,6 +67,7 @@ app.include_router(tickers.router, prefix="/api/v1/tickers", tags=["Tickers"])
 app.include_router(watchlist.router, prefix="/api/v1/watchlist", tags=["Watchlist"])
 app.include_router(alerts.router, prefix="/api/v1/alerts", tags=["Alerts"])
 app.include_router(billing.router, prefix="/api/v1/billing", tags=["Billing"])
+app.include_router(stats.router, prefix="/api/v1/stats", tags=["Stats"])
 
 # WebSocket routes (no prefix - paths defined in router)
 app.include_router(websocket_router, tags=["WebSocket"])

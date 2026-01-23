@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import {
   LayoutDashboard,
   Rss,
@@ -12,24 +13,50 @@ import {
   TrendingUp,
   TrendingDown,
   ArrowUpRight,
+  ArrowDownRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-const navigation = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { name: 'Event Feed', href: '/dashboard/feed', icon: Rss },
-  { name: 'High Alpha', href: '/dashboard/high-alpha', icon: TrendingUp, badge: 3 },
-  { name: 'Search', href: '/dashboard/search', icon: Search },
-  { name: 'Watchlist', href: '/dashboard/watchlist', icon: Star },
-  { name: 'Alerts', href: '/dashboard/alerts', icon: Bell },
-];
+import { api } from '@/lib/api';
 
 const secondaryNavigation = [
   { name: 'Settings', href: '/dashboard/settings', icon: Settings },
 ];
 
+function calculateChange(current: number, previous: number): { value: number; direction: 'up' | 'down' | 'neutral' } {
+  if (previous === 0) return { value: 0, direction: 'neutral' };
+  const change = ((current - previous) / previous) * 100;
+  return {
+    value: Math.abs(Math.round(change)),
+    direction: change > 0 ? 'up' : change < 0 ? 'down' : 'neutral',
+  };
+}
+
 export function Sidebar() {
   const pathname = usePathname();
+
+  // Fetch stats
+  const { data: stats } = useQuery({
+    queryKey: ['stats'],
+    queryFn: () => api.getStats(),
+    refetchInterval: 60000,
+  });
+
+  const totalEvents = stats?.total_events || 0;
+  const bullishEvents = stats?.bullish_events || 0;
+  const bearishEvents = stats?.bearish_events || 0;
+  const highAlphaEvents = stats?.high_alpha_events || 0;
+  const totalChange = stats
+    ? calculateChange(stats.total_events, stats.total_events_yesterday)
+    : { value: 0, direction: 'neutral' as const };
+
+  const navigation = [
+    { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+    { name: 'Event Feed', href: '/dashboard/feed', icon: Rss },
+    { name: 'High Alpha', href: '/dashboard/high-alpha', icon: TrendingUp, badge: highAlphaEvents > 0 ? highAlphaEvents : undefined },
+    { name: 'Search', href: '/dashboard/search', icon: Search },
+    { name: 'Watchlist', href: '/dashboard/watchlist', icon: Star },
+    { name: 'Alerts', href: '/dashboard/alerts', icon: Bell },
+  ];
 
   return (
     <aside className="fixed left-0 top-16 bottom-0 w-64 bg-bg-elevated border-r border-border overflow-y-auto custom-scrollbar">
@@ -86,13 +113,22 @@ export function Sidebar() {
           <div className="card rounded-xl p-4 space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="font-mono text-2xl font-semibold text-text-primary">247</div>
+                <div className="font-mono text-2xl font-semibold text-text-primary">{totalEvents}</div>
                 <div className="text-2xs text-text-tertiary">Total Events</div>
               </div>
-              <div className="text-2xs text-positive font-medium flex items-center gap-1">
-                +12%
-                <ArrowUpRight className="h-3 w-3" />
-              </div>
+              {totalChange.direction !== 'neutral' && (
+                <div className={cn(
+                  'text-2xs font-medium flex items-center gap-1',
+                  totalChange.direction === 'up' ? 'text-positive' : 'text-negative'
+                )}>
+                  {totalChange.direction === 'up' ? '+' : '-'}{totalChange.value}%
+                  {totalChange.direction === 'up' ? (
+                    <ArrowUpRight className="h-3 w-3" />
+                  ) : (
+                    <ArrowDownRight className="h-3 w-3" />
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3 pt-3 border-t border-border">
@@ -101,7 +137,7 @@ export function Sidebar() {
                   <TrendingUp className="h-3 w-3 text-positive" />
                 </div>
                 <div>
-                  <div className="font-mono text-sm font-semibold text-positive">84</div>
+                  <div className="font-mono text-sm font-semibold text-positive">{bullishEvents}</div>
                   <div className="text-2xs text-text-tertiary">Bullish</div>
                 </div>
               </div>
@@ -110,7 +146,7 @@ export function Sidebar() {
                   <TrendingDown className="h-3 w-3 text-negative" />
                 </div>
                 <div>
-                  <div className="font-mono text-sm font-semibold text-negative">52</div>
+                  <div className="font-mono text-sm font-semibold text-negative">{bearishEvents}</div>
                   <div className="text-2xs text-text-tertiary">Bearish</div>
                 </div>
               </div>
@@ -121,7 +157,7 @@ export function Sidebar() {
                 <TrendingUp className="h-3 w-3 text-accent" />
               </div>
               <div>
-                <div className="font-mono text-sm font-semibold text-accent">12</div>
+                <div className="font-mono text-sm font-semibold text-accent">{highAlphaEvents}</div>
                 <div className="text-2xs text-text-tertiary">High Alpha Signals</div>
               </div>
             </div>
