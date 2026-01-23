@@ -2,7 +2,7 @@
 
 import { useSession, signOut } from 'next-auth/react';
 import Link from 'next/link';
-import { Bell, Search, User, LogOut, Settings } from 'lucide-react';
+import { Bell, Search, LogOut, Settings, ChevronDown } from 'lucide-react';
 import { useState } from 'react';
 
 export function Header() {
@@ -10,48 +10,61 @@ export function Header() {
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   return (
-    <header className="sticky top-0 z-50 bg-slate-800/80 backdrop-blur-sm border-b border-slate-700">
+    <header className="sticky top-0 z-50 bg-bg-elevated/80 backdrop-blur-xl border-b border-border">
       <div className="flex items-center justify-between h-16 px-6">
         {/* Logo */}
-        <Link href="/dashboard" className="flex items-center space-x-2">
-          <div className="w-8 h-8 bg-brand-500 rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-sm">MA</span>
+        <Link href="/dashboard" className="flex items-center gap-2.5 group">
+          <div className="w-8 h-8 bg-text-primary rounded-lg flex items-center justify-center group-hover:scale-105 transition-transform">
+            <span className="text-bg-primary font-mono font-bold text-sm">M</span>
           </div>
-          <span className="text-white font-semibold text-lg">Micro-Alpha</span>
+          <span className="font-semibold text-lg tracking-tight text-text-primary">Micro-Alpha</span>
         </Link>
 
         {/* Search */}
         <div className="flex-1 max-w-xl mx-8">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text-quaternary" />
             <input
               type="text"
-              placeholder="Search events, tickers..."
-              className="w-full pl-10 pr-4 py-2 bg-slate-900/50 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              placeholder="Search events, tickers, news..."
+              className="input w-full pl-11 pr-4 py-2.5 text-sm"
             />
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 hidden sm:flex items-center gap-1">
+              <kbd className="px-1.5 py-0.5 text-2xs font-mono bg-bg-tertiary border border-border rounded text-text-quaternary">⌘</kbd>
+              <kbd className="px-1.5 py-0.5 text-2xs font-mono bg-bg-tertiary border border-border rounded text-text-quaternary">K</kbd>
+            </div>
           </div>
         </div>
 
         {/* Right side */}
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center gap-2">
+          {/* Live indicator */}
+          <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-positive-subtle rounded-full mr-2">
+            <div className="live-dot" />
+            <span className="text-xs font-medium text-positive">Live</span>
+          </div>
+
           {/* Notifications */}
-          <button className="relative p-2 text-slate-400 hover:text-white transition-colors">
+          <button className="relative p-2.5 text-text-tertiary hover:text-text-primary hover:bg-hover rounded-lg transition-colors">
             <Bell className="h-5 w-5" />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
+            <span className="absolute top-2 right-2 w-2 h-2 bg-negative rounded-full" />
           </button>
 
           {/* User menu */}
           <div className="relative">
             <button
               onClick={() => setShowUserMenu(!showUserMenu)}
-              className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-700/50 transition-colors"
+              className="flex items-center gap-2 p-2 rounded-lg hover:bg-hover transition-colors"
             >
-              <div className="w-8 h-8 bg-slate-600 rounded-full flex items-center justify-center">
-                <User className="h-4 w-4 text-slate-300" />
+              <div className="w-8 h-8 bg-accent-subtle rounded-full flex items-center justify-center">
+                <span className="text-sm font-semibold text-accent">
+                  {session?.user?.name?.[0] || session?.user?.email?.[0]?.toUpperCase() || 'U'}
+                </span>
               </div>
-              <span className="text-white text-sm">
+              <span className="text-text-primary text-sm hidden sm:block font-medium">
                 {session?.user?.name || session?.user?.email?.split('@')[0]}
               </span>
+              <ChevronDown className="h-4 w-4 text-text-quaternary hidden sm:block" />
             </button>
 
             {showUserMenu && (
@@ -60,33 +73,39 @@ export function Header() {
                   className="fixed inset-0 z-10"
                   onClick={() => setShowUserMenu(false)}
                 />
-                <div className="absolute right-0 mt-2 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-20 py-1">
-                  <div className="px-4 py-2 border-b border-slate-700">
-                    <p className="text-xs text-slate-400">Signed in as</p>
-                    <p className="text-sm text-white truncate">
+                <div className="absolute right-0 mt-2 w-60 bg-bg-elevated border border-border rounded-xl shadow-lg z-20 py-1 overflow-hidden animate-scale-in">
+                  <div className="px-4 py-3 border-b border-border bg-bg-secondary">
+                    <p className="text-sm font-medium text-text-primary truncate">
+                      {session?.user?.name || 'User'}
+                    </p>
+                    <p className="text-xs text-text-tertiary truncate mt-0.5">
                       {session?.user?.email}
                     </p>
-                    <p className="text-xs text-brand-400 mt-1 capitalize">
-                      {session?.user?.subscriptionTier} Plan
-                    </p>
+                    <div className="flex items-center gap-2 mt-2">
+                      <span className="px-2 py-0.5 text-2xs font-medium bg-accent-subtle text-accent rounded-full capitalize">
+                        {session?.user?.subscriptionTier || 'starter'} Plan
+                      </span>
+                    </div>
                   </div>
 
-                  <Link
-                    href="/dashboard/settings"
-                    className="flex items-center px-4 py-2 text-sm text-slate-300 hover:bg-slate-700/50 transition-colors"
-                    onClick={() => setShowUserMenu(false)}
-                  >
-                    <Settings className="h-4 w-4 mr-2" />
-                    Settings
-                  </Link>
+                  <div className="py-1">
+                    <Link
+                      href="/dashboard/settings"
+                      className="flex items-center px-4 py-2.5 text-sm text-text-secondary hover:text-text-primary hover:bg-hover transition-colors"
+                      onClick={() => setShowUserMenu(false)}
+                    >
+                      <Settings className="h-4 w-4 mr-3" />
+                      Settings
+                    </Link>
 
-                  <button
-                    onClick={() => signOut({ callbackUrl: '/auth/login' })}
-                    className="w-full flex items-center px-4 py-2 text-sm text-slate-300 hover:bg-slate-700/50 transition-colors"
-                  >
-                    <LogOut className="h-4 w-4 mr-2" />
-                    Sign out
-                  </button>
+                    <button
+                      onClick={() => signOut({ callbackUrl: '/auth/login' })}
+                      className="w-full flex items-center px-4 py-2.5 text-sm text-text-secondary hover:text-text-primary hover:bg-hover transition-colors"
+                    >
+                      <LogOut className="h-4 w-4 mr-3" />
+                      Sign out
+                    </button>
+                  </div>
                 </div>
               </>
             )}

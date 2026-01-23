@@ -51,7 +51,6 @@ class TickerSuggestion(BaseModel):
 async def search_events(
     db: DBSession,
     current_user: CurrentUser,
-    query: str = Query(..., min_length=2, description="Search query"),
     ticker: str | None = Query(None, description="Filter by ticker"),
     event_type: str | None = Query(None, description="Filter by event type"),
     direction: str | None = Query(None, description="Filter by direction"),

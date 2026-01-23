@@ -224,6 +224,7 @@ async def stripe_webhook(
         )
 
 
+<<<<<<< HEAD
 # Subscription tier mapping from Stripe price IDs
 PRICE_TO_TIER = {
     "price_starter_monthly": "starter",
