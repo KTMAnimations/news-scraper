@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 
-from backend.api.dependencies import CurrentUser, DBSession
+from backend.api.dependencies import DBSession, OptionalUser
 from backend.storage.timescale.models import Event
 
 router = APIRouter()
@@ -28,7 +28,7 @@ class StatsResponse(BaseModel):
 @router.get("", response_model=StatsResponse)
 async def get_dashboard_stats(
     db: DBSession,
-    current_user: CurrentUser,
+    current_user: OptionalUser,
 ):
     """Get dashboard statistics."""
     now = datetime.now(timezone.utc)
