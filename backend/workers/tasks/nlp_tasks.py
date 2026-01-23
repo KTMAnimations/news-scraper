@@ -9,9 +9,81 @@ from backend.workers.celery_app import celery_app
 logger = structlog.get_logger(__name__)
 
 
+import re
+import asyncio
+
+# Global ticker knowledge base (lazy loaded)
+_ticker_kb = None
+
+
+def _get_ticker_kb():
+    """Get or create cached ticker knowledge base."""
+    global _ticker_kb
+    if _ticker_kb is None:
+        from backend.processing.ner import TickerKnowledgeBase
+        _ticker_kb = TickerKnowledgeBase()
+        # Load synchronously
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_ticker_kb.load())
+        finally:
+            loop.close()
+        logger.info(f"Loaded ticker knowledge base with {len(_ticker_kb._cik_to_ticker)} CIK mappings")
+    return _ticker_kb
+
+
+def _extract_cik_from_data(data: dict[str, Any]) -> str | None:
+    """Extract CIK number from filing data.
+
+    Args:
+        data: Filing data dictionary
+
+    Returns:
+        CIK number as string (without leading zeros) or None
+    """
+    # Try direct cik field
+    if data.get("cik"):
+        cik = str(data["cik"]).lstrip("0")
+        if cik:
+            return cik
+
+    # Try to extract from URL (e.g., /Archives/edgar/data/1234567/...)
+    for url_field in ["link", "filing_url", "source_url", "url"]:
+        url = data.get(url_field, "")
+        if url:
+            match = re.search(r'/data/(\d+)/', url)
+            if match:
+                return match.group(1).lstrip("0")
+
+    return None
+
+
+def _resolve_cik_to_ticker(cik: str) -> str | None:
+    """Resolve CIK to ticker using knowledge base.
+
+    Args:
+        cik: CIK number
+
+    Returns:
+        Ticker symbol or None
+    """
+    try:
+        kb = _get_ticker_kb()
+        # Try with and without leading zeros
+        ticker = kb._cik_to_ticker.get(cik)
+        if not ticker:
+            # Try with leading zeros (SEC format is 10 digits)
+            padded_cik = cik.zfill(10)
+            ticker = kb._cik_to_ticker.get(padded_cik)
+        return ticker
+    except Exception as e:
+        logger.warning("Failed to resolve CIK to ticker", cik=cik, error=str(e))
+        return None
+
+
 @celery_app.task(bind=True, max_retries=2)
 def extract_entities_task(self, data: dict[str, Any]) -> dict[str, Any]:
-    """Extract entities from text content.
+    """Extract entities from text content and resolve CIK to ticker.
 
     Args:
         data: Event data with text content
@@ -38,11 +110,11 @@ def extract_entities_task(self, data: dict[str, Any]) -> dict[str, Any]:
         if not text:
             return data
 
-        # Extract entities
+        # Extract entities from text
         extractor = EntityExtractor(use_spacy=False)  # Use regex for speed
         entities = extractor.extract(text)
 
-        # Enrich data
+        # Enrich data with extracted entities
         data["extracted_tickers"] = entities.tickers
         data["extracted_companies"] = entities.companies
         data["extracted_people"] = entities.people
@@ -52,9 +124,21 @@ def extract_entities_task(self, data: dict[str, Any]) -> dict[str, Any]:
         if not data.get("ticker") and entities.tickers:
             data["ticker"] = entities.tickers[0]
 
+        # If still no ticker, try to resolve from CIK (for SEC filings)
+        if not data.get("ticker"):
+            cik = _extract_cik_from_data(data)
+            if cik:
+                ticker = _resolve_cik_to_ticker(cik)
+                if ticker:
+                    data["ticker"] = ticker
+                    if ticker not in data.get("extracted_tickers", []):
+                        data["extracted_tickers"] = [ticker] + data.get("extracted_tickers", [])
+                    logger.debug("Resolved CIK to ticker", cik=cik, ticker=ticker)
+
         logger.debug(
             "Entities extracted",
-            tickers=entities.tickers,
+            tickers=data.get("extracted_tickers", []),
+            ticker=data.get("ticker"),
             companies=len(entities.companies),
         )
 
@@ -65,9 +149,23 @@ def extract_entities_task(self, data: dict[str, Any]) -> dict[str, Any]:
         raise self.retry(exc=e, countdown=5)
 
 
+# Global sentiment service instance (lazy loaded)
+_sentiment_service = None
+
+
+def get_cached_sentiment_service():
+    """Get or create cached sentiment service instance."""
+    global _sentiment_service
+    if _sentiment_service is None:
+        from backend.processing.sentiment import get_sentiment_service
+        _sentiment_service = get_sentiment_service(use_finbert=True)
+        logger.info(f"Loaded sentiment service: {type(_sentiment_service).__name__}")
+    return _sentiment_service
+
+
 @celery_app.task(bind=True, max_retries=2)
 def analyze_sentiment_task(self, data: dict[str, Any]) -> dict[str, Any]:
-    """Analyze sentiment of text content.
+    """Analyze sentiment of text content using FinBERT.
 
     Args:
         data: Event data with text content
@@ -76,8 +174,6 @@ def analyze_sentiment_task(self, data: dict[str, Any]) -> dict[str, Any]:
         Data enriched with sentiment analysis
     """
     try:
-        from backend.processing.sentiment import SimpleSentimentService
-
         # Get text for sentiment analysis
         text = data.get("headline", "") or data.get("title", "")
         if not text:
@@ -89,8 +185,8 @@ def analyze_sentiment_task(self, data: dict[str, Any]) -> dict[str, Any]:
             data["sentiment_confidence"] = 0.5
             return data
 
-        # Use simple sentiment for worker tasks (FinBERT for batch/GPU)
-        service = SimpleSentimentService()
+        # Use FinBERT for accurate financial sentiment analysis
+        service = get_cached_sentiment_service()
         result = service.analyze(text)
 
         # Enrich data
@@ -103,6 +199,7 @@ def analyze_sentiment_task(self, data: dict[str, Any]) -> dict[str, Any]:
             "Sentiment analyzed",
             label=result.label,
             score=result.score,
+            model=type(service).__name__,
         )
 
         return data

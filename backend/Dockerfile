@@ -27,6 +27,11 @@ RUN pip install --upgrade pip && \
 # Download spaCy model
 RUN python -m spacy download en_core_web_sm
 
+# Pre-download FinBERT model for sentiment analysis
+RUN python -c "from transformers import AutoModelForSequenceClassification, AutoTokenizer; \
+    AutoTokenizer.from_pretrained('ProsusAI/finbert'); \
+    AutoModelForSequenceClassification.from_pretrained('ProsusAI/finbert')"
+
 # Copy application code into backend subdirectory
 COPY . /app/backend
 

@@ -18,6 +18,7 @@ import { api } from '@/lib/api';
 import { cn, formatRelativeTime, formatDateTime } from '@/lib/utils';
 import { EventCard } from '@/components/events/EventCard';
 import { SentimentBadge } from '@/components/events/SentimentBadge';
+import { TradingViewChart } from '@/components/charts/TradingViewChart';
 import type { Event } from '@/types/events';
 
 // Simple sentiment chart component using div bars
@@ -268,6 +269,25 @@ export default function TickerDetailPage() {
             ) : null}
           </div>
         </div>
+      </div>
+
+      {/* TradingView Chart */}
+      <div className="card rounded-2xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-text-primary">
+            {ticker} Price Chart
+          </h2>
+          <a
+            href={`https://www.tradingview.com/symbols/${ticker}/`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-xs text-text-tertiary hover:text-accent transition-colors"
+          >
+            <span>Open in TradingView</span>
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        </div>
+        <TradingViewChart symbol={ticker} theme="dark" height={500} interval="D" />
       </div>
 
       {/* Chart & Sentiment Overview */}

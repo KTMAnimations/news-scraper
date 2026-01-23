@@ -132,12 +132,9 @@ services:
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
       - NEXT_PUBLIC_WS_URL=ws://localhost:8001
+      - NEXT_PUBLIC_MOCK_MODE=true
       - NEXTAUTH_URL=http://localhost:3000
       - NEXTAUTH_SECRET=dev-nextauth-secret-change-in-production
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
     depends_on:
       - api
     networks:
