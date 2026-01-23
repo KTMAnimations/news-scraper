@@ -44,10 +44,10 @@ def store_event_task(self, data: dict[str, Any]) -> dict[str, Any]:
             headline = data.get("headline") or data.get("title") or ""
 
             # Validate - skip events without proper ticker or headline
-            if ticker == "UNKNOWN" and not headline.strip():
-                logger.debug("Skipping event without ticker or headline")
+            if ticker == "UNKNOWN":
+                logger.debug("Skipping event without valid ticker")
                 data["skipped"] = True
-                data["skip_reason"] = "No ticker or headline"
+                data["skip_reason"] = "No valid ticker"
                 return data
 
             if not headline.strip() or headline == "No headline":
@@ -55,22 +55,6 @@ def store_event_task(self, data: dict[str, Any]) -> dict[str, Any]:
                 data["skipped"] = True
                 data["skip_reason"] = "No valid headline"
                 return data
-
-            # Check for duplicate based on headline hash
-            import hashlib
-            headline_hash = hashlib.md5(f"{ticker}:{headline}".encode()).hexdigest()
-
-            async with get_db_context() as session:
-                from sqlalchemy import text
-                result = await session.execute(
-                    text("SELECT 1 FROM events WHERE md5(ticker || ':' || headline) = :hash LIMIT 1"),
-                    {"hash": headline_hash}
-                )
-                if result.fetchone():
-                    logger.debug("Skipping duplicate event", ticker=ticker, headline=headline[:50])
-                    data["skipped"] = True
-                    data["skip_reason"] = "Duplicate event"
-                    return data
 
             # Extract event time from various possible fields
             event_time = _parse_datetime(
@@ -121,8 +105,21 @@ def store_event_task(self, data: dict[str, Any]) -> dict[str, Any]:
                 },
             }
 
-            # Store in database
+            # Store in database (with duplicate check)
             async with get_db_context() as session:
+                from sqlalchemy import text
+
+                # Check for duplicate
+                result = await session.execute(
+                    text("SELECT 1 FROM events WHERE ticker = :ticker AND headline = :headline LIMIT 1"),
+                    {"ticker": ticker, "headline": headline}
+                )
+                if result.fetchone():
+                    logger.debug("Skipping duplicate event", ticker=ticker)
+                    data["skipped"] = True
+                    data["skip_reason"] = "Duplicate event"
+                    return data
+
                 queries = EventQueries(session)
                 event = await queries.create_event(event_data)
 
