@@ -181,11 +181,23 @@ class AlphaCalculator:
             is_material=classification.is_material,
         )
 
-        # Determine direction
-        if alpha > 0.2:
+        # Determine direction - use sentiment as primary signal when alpha is weak
+        # but sentiment signal is clear
+        sentiment_driven_direction = "NEUTRAL"
+        if sentiment and sentiment.confidence > 0.5:
+            if sentiment.score > 0.3:
+                sentiment_driven_direction = "BULLISH"
+            elif sentiment.score < -0.3:
+                sentiment_driven_direction = "BEARISH"
+
+        # Primary direction from combined alpha score
+        if alpha > 0.15:
             direction = "BULLISH"
-        elif alpha < -0.2:
+        elif alpha < -0.15:
             direction = "BEARISH"
+        elif sentiment_driven_direction != "NEUTRAL":
+            # Fall back to sentiment-driven direction when alpha is neutral
+            direction = sentiment_driven_direction
         else:
             direction = "NEUTRAL"
 
