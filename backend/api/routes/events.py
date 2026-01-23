@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 
-from backend.api.dependencies import CurrentUser, DBSession
+from backend.api.dependencies import DBSession, OptionalUser
 from backend.storage.timescale.queries import EventQueries
 
 router = APIRouter()
@@ -45,7 +45,7 @@ class EventListResponse(BaseModel):
 @router.get("", response_model=EventListResponse)
 async def list_events(
     db: DBSession,
-    current_user: CurrentUser,
+    current_user: OptionalUser,
     ticker: str | None = Query(None, description="Filter by ticker"),
     event_type: str | None = Query(None, description="Filter by event type"),
     min_alpha: float | None = Query(None, description="Minimum alpha score"),
@@ -99,7 +99,7 @@ async def list_events(
 @router.get("/latest", response_model=list[EventResponse])
 async def get_latest_events(
     db: DBSession,
-    current_user: CurrentUser,
+    current_user: OptionalUser,
     limit: int = Query(50, ge=1, le=100),
 ):
     """Get latest events."""
@@ -131,7 +131,7 @@ async def get_latest_events(
 @router.get("/high-alpha", response_model=list[EventResponse])
 async def get_high_alpha_events(
     db: DBSession,
-    current_user: CurrentUser,
+    current_user: OptionalUser,
     min_alpha: float = Query(0.5, ge=0.0, le=1.0),
     hours: int = Query(24, ge=1, le=168),
     limit: int = Query(50, ge=1, le=100),
@@ -170,7 +170,7 @@ async def get_high_alpha_events(
 async def get_ticker_events(
     ticker: str,
     db: DBSession,
-    current_user: CurrentUser,
+    current_user: OptionalUser,
     limit: int = Query(100, ge=1, le=500),
 ):
     """Get events for a specific ticker."""
@@ -203,7 +203,7 @@ async def get_ticker_events(
 async def get_event(
     event_id: UUID,
     db: DBSession,
-    current_user: CurrentUser,
+    current_user: OptionalUser,
 ):
     """Get single event by ID."""
     queries = EventQueries(db)

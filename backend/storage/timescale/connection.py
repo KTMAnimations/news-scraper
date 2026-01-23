@@ -9,13 +9,15 @@ from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from backend.config import settings
 
-# Create async engine (for FastAPI)
+# Create async engine with conservative pool settings
 engine = create_async_engine(
     str(settings.database_url),
     echo=settings.debug,
-    pool_size=10,
-    max_overflow=20,
+    pool_size=5,
+    max_overflow=10,
     pool_pre_ping=True,
+    pool_recycle=300,  # Recycle connections after 5 minutes
+    pool_timeout=30,
 )
 
 # Async session factory

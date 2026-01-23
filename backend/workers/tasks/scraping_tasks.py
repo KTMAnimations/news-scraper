@@ -237,13 +237,15 @@ def process_filing(filing: dict[str, Any]) -> dict[str, Any]:
     """
     from backend.workers.tasks.nlp_tasks import extract_entities_task, analyze_sentiment_task
     from backend.workers.tasks.scoring_tasks import calculate_alpha_task
+    from backend.workers.tasks.storage_tasks import store_event_task
     from backend.workers.tasks.alerting_tasks import check_alerts_task
 
-    # Chain: extract entities -> analyze sentiment -> calculate alpha -> check alerts
+    # Chain: extract entities -> analyze sentiment -> calculate alpha -> store -> check alerts
     chain = (
         extract_entities_task.s(filing) |
         analyze_sentiment_task.s() |
         calculate_alpha_task.s() |
+        store_event_task.s() |
         check_alerts_task.s()
     )
 
@@ -268,12 +270,15 @@ def process_article(article: dict[str, Any]) -> dict[str, Any]:
     """
     from backend.workers.tasks.nlp_tasks import extract_entities_task, analyze_sentiment_task
     from backend.workers.tasks.scoring_tasks import calculate_alpha_task
+    from backend.workers.tasks.storage_tasks import store_event_task
     from backend.workers.tasks.alerting_tasks import check_alerts_task
 
+    # Chain: extract entities -> analyze sentiment -> calculate alpha -> store -> check alerts
     chain = (
         extract_entities_task.s(article) |
         analyze_sentiment_task.s() |
         calculate_alpha_task.s() |
+        store_event_task.s() |
         check_alerts_task.s()
     )
 
@@ -298,12 +303,15 @@ def process_social_mention(mention: dict[str, Any]) -> dict[str, Any]:
     """
     from backend.workers.tasks.nlp_tasks import analyze_sentiment_task
     from backend.workers.tasks.scoring_tasks import calculate_alpha_task
+    from backend.workers.tasks.storage_tasks import store_event_task
     from backend.workers.tasks.alerting_tasks import check_alerts_task
 
     # Social mentions may already have ticker extracted
+    # Chain: analyze sentiment -> calculate alpha -> store -> check alerts
     chain = (
         analyze_sentiment_task.s(mention) |
         calculate_alpha_task.s() |
+        store_event_task.s() |
         check_alerts_task.s()
     )
 
@@ -328,10 +336,13 @@ def process_event(event: dict[str, Any]) -> dict[str, Any]:
     """
     # Events already have ticker and classification
     from backend.workers.tasks.scoring_tasks import calculate_alpha_task
+    from backend.workers.tasks.storage_tasks import store_event_task
     from backend.workers.tasks.alerting_tasks import check_alerts_task
 
+    # Chain: calculate alpha -> store -> check alerts
     chain = (
         calculate_alpha_task.s(event) |
+        store_event_task.s() |
         check_alerts_task.s()
     )
 

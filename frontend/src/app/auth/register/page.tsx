@@ -52,6 +52,14 @@ export default function RegisterPage() {
         router.push('/auth/login');
       }, 2000);
     } catch (err) {
+      // In mock mode, registration always succeeds
+      if (process.env.NEXT_PUBLIC_MOCK_MODE === 'true') {
+        setSuccess(true);
+        setTimeout(() => {
+          router.push('/auth/login');
+        }, 2000);
+        return;
+      }
       setError(err instanceof Error ? err.message : 'Registration failed');
     }
   };

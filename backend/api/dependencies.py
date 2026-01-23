@@ -130,7 +130,43 @@ def require_subscription(min_tier: str = "starter"):
     return check_subscription
 
 
+async def get_optional_current_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(HTTPBearer(auto_error=False))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> User | None:
+    """Get current authenticated user optionally.
+
+    Returns None if not authenticated instead of raising an exception.
+    """
+    if not credentials:
+        return None
+
+    try:
+        token = credentials.credentials
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+        user_id = payload.get("sub")
+        if user_id is None:
+            return None
+
+    except JWTError:
+        return None
+
+    # Get user from database
+    queries = UserQueries(db)
+    user = await queries.get_user_by_id(user_id)
+
+    if user is None or not user.is_active:
+        return None
+
+    return user
+
+
 # Type aliases for cleaner signatures
 DBSession = Annotated[AsyncSession, Depends(get_db)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
 ActiveUser = Annotated[User, Depends(get_current_active_user)]
+OptionalUser = Annotated[User | None, Depends(get_optional_current_user)]

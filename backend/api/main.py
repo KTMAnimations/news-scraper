@@ -10,7 +10,7 @@ from backend.config import settings
 from backend.storage.timescale import init_db
 
 from .middleware import RateLimitMiddleware
-from .routes import alerts, auth, billing, events, search, tickers, watchlist
+from .routes import alerts, auth, billing, events, search, stats, tickers, watchlist
 from .websocket.streamer import EventStreamer, router as websocket_router
 
 logger = structlog.get_logger(__name__)

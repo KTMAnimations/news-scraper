@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Zap,
 } from 'lucide-react';
+import Link from 'next/link';
 import { api } from '@/lib/api';
 import { cn, formatRelativeTime, formatDateTime } from '@/lib/utils';
 import { SentimentBadge } from '@/components/events/SentimentBadge';
@@ -192,7 +193,13 @@ export default function HighAlphaPage() {
                 >
                   <div className="flex items-center justify-between mb-2.5">
                     <div className="flex items-center gap-2">
-                      <span className="ticker-chip">{event.ticker}</span>
+                      <Link
+                        href={`/dashboard/ticker/${event.ticker}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="ticker-chip hover:bg-accent hover:text-bg-primary transition-colors"
+                      >
+                        {event.ticker}
+                      </Link>
                       <span
                         className={cn(
                           'flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-lg',
@@ -255,9 +262,12 @@ export default function HighAlphaPage() {
               {/* Header */}
               <div>
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="ticker-chip text-lg px-3 py-1.5">
+                  <Link
+                    href={`/dashboard/ticker/${selectedEvent.ticker}`}
+                    className="ticker-chip text-lg px-3 py-1.5 hover:bg-accent hover:text-bg-primary transition-colors"
+                  >
                     {selectedEvent.ticker}
-                  </span>
+                  </Link>
                   <span
                     className={cn(
                       'flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg',
@@ -349,9 +359,13 @@ export default function HighAlphaPage() {
                     <p className="data-label mb-2">Related Tickers</p>
                     <div className="flex flex-wrap gap-1">
                       {selectedEvent.extracted_tickers.map((ticker) => (
-                        <span key={ticker} className="ticker-chip text-xs">
+                        <Link
+                          key={ticker}
+                          href={`/dashboard/ticker/${ticker}`}
+                          className="ticker-chip text-xs hover:bg-accent hover:text-bg-primary transition-colors"
+                        >
                           {ticker}
-                        </span>
+                        </Link>
                       ))}
                     </div>
                   </div>

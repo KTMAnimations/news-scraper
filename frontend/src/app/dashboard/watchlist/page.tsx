@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Star,
@@ -268,7 +269,13 @@ export default function WatchlistPage() {
                   )}
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="ticker-chip">{item.ticker}</span>
+                    <Link
+                      href={`/dashboard/ticker/${item.ticker}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="ticker-chip hover:bg-accent hover:text-bg-primary transition-colors"
+                    >
+                      {item.ticker}
+                    </Link>
                     <div className="flex items-center gap-1">
                       <button
                         onClick={(e) => {

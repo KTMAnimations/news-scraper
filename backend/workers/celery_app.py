@@ -15,6 +15,7 @@ celery_app = Celery(
         "backend.workers.tasks.nlp_tasks",
         "backend.workers.tasks.scoring_tasks",
         "backend.workers.tasks.alerting_tasks",
+        "backend.workers.tasks.storage_tasks",
     ],
 )
 
