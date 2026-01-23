@@ -9,6 +9,10 @@ from backend.config import settings
 from backend.storage.timescale import init_db
 
 from .routes import alerts, auth, billing, events, search, stats, tickers, watchlist
+from .websocket.streamer import EventStreamer, router as websocket_router
+
+# Global event streamer instance
+event_streamer = EventStreamer()
 
 
 @asynccontextmanager
@@ -16,9 +20,10 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     # Startup
     await init_db()
+    await event_streamer.start()
     yield
     # Shutdown
-    pass
+    await event_streamer.stop()
 
 
 # Create FastAPI app
@@ -47,6 +52,7 @@ app.include_router(watchlist.router, prefix="/api/v1/watchlist", tags=["Watchlis
 app.include_router(alerts.router, prefix="/api/v1/alerts", tags=["Alerts"])
 app.include_router(billing.router, prefix="/api/v1/billing", tags=["Billing"])
 app.include_router(stats.router, prefix="/api/v1/stats", tags=["Stats"])
+app.include_router(websocket_router, prefix="/api/v1", tags=["WebSocket"])
 
 
 @app.get("/")
