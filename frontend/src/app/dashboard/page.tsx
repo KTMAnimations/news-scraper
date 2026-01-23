@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { TrendingUp, TrendingDown, Clock, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -271,9 +272,13 @@ export default function DashboardPage() {
                   )}
                 >
                   <div className="flex items-center justify-between mb-2.5">
-                    <span className="ticker-chip">
+                    <Link
+                      href={`/dashboard/ticker/${event.ticker}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="ticker-chip hover:bg-accent hover:text-bg-primary transition-colors"
+                    >
                       {event.ticker}
-                    </span>
+                    </Link>
                     <span className="text-xs text-text-tertiary flex items-center gap-1.5">
                       <Clock className="h-3 w-3" />
                       {formatRelativeTime(event.event_time)}
