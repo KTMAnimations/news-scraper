@@ -40,15 +40,44 @@ def store_event_task(self, data: dict[str, Any]) -> dict[str, Any]:
             # Extract ticker - try multiple fields
             ticker = _extract_ticker(data)
 
+            # Get headline from title or headline field
+            headline = data.get("headline") or data.get("title") or ""
+
+            # Validate - skip events without proper ticker or headline
+            if ticker == "UNKNOWN" and not headline.strip():
+                logger.debug("Skipping event without ticker or headline")
+                data["skipped"] = True
+                data["skip_reason"] = "No ticker or headline"
+                return data
+
+            if not headline.strip() or headline == "No headline":
+                logger.debug("Skipping event without valid headline", ticker=ticker)
+                data["skipped"] = True
+                data["skip_reason"] = "No valid headline"
+                return data
+
+            # Check for duplicate based on headline hash
+            import hashlib
+            headline_hash = hashlib.md5(f"{ticker}:{headline}".encode()).hexdigest()
+
+            async with get_db_context() as session:
+                from sqlalchemy import text
+                result = await session.execute(
+                    text("SELECT 1 FROM events WHERE md5(ticker || ':' || headline) = :hash LIMIT 1"),
+                    {"hash": headline_hash}
+                )
+                if result.fetchone():
+                    logger.debug("Skipping duplicate event", ticker=ticker, headline=headline[:50])
+                    data["skipped"] = True
+                    data["skip_reason"] = "Duplicate event"
+                    return data
+
             # Extract event time from various possible fields
             event_time = _parse_datetime(
                 data.get("event_time") or data.get("filing_time") or
                 data.get("published_at") or data.get("created_at") or
                 data.get("ingested_at")
             ) or datetime.now(timezone.utc)
-
-            # Get headline from title or headline field
-            headline = data.get("headline") or data.get("title") or "No headline"
 
             # Determine event type - map filing types to event types
             event_type = data.get("event_type") or data.get("filing_category") or "NEWS"

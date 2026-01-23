@@ -193,7 +193,7 @@ export function Sidebar() {
             Get unlimited watchlist slots and real-time alerts
           </p>
           <Link
-            href="/dashboard/settings/billing"
+            href="/dashboard/settings?tab=billing"
             className="btn btn-primary text-xs px-4 py-2 w-full"
           >
             View Plans
