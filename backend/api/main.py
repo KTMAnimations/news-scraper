@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings
 from backend.storage.timescale import init_db
 
-from .routes import alerts, auth, billing, events, search, tickers, watchlist
+from .routes import alerts, auth, billing, events, search, stats, tickers, watchlist
 
 
 @asynccontextmanager
@@ -46,6 +46,7 @@ app.include_router(tickers.router, prefix="/api/v1/tickers", tags=["Tickers"])
 app.include_router(watchlist.router, prefix="/api/v1/watchlist", tags=["Watchlist"])
 app.include_router(alerts.router, prefix="/api/v1/alerts", tags=["Alerts"])
 app.include_router(billing.router, prefix="/api/v1/billing", tags=["Billing"])
+app.include_router(stats.router, prefix="/api/v1/stats", tags=["Stats"])
 
 
 @app.get("/")

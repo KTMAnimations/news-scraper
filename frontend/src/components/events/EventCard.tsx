@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import {
   TrendingUp,
   TrendingDown,
@@ -62,9 +63,13 @@ export function EventCard({ event, compact = false }: EventCardProps) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-2.5 flex-wrap">
             {/* Ticker */}
-            <span className="ticker-chip">
+            <Link
+              href={`/dashboard/ticker/${event.ticker}`}
+              onClick={(e) => e.stopPropagation()}
+              className="ticker-chip hover:bg-accent hover:text-bg-primary transition-colors"
+            >
               {event.ticker}
-            </span>
+            </Link>
 
             {/* Event type badge */}
             <span className="badge badge-neutral">
@@ -166,9 +171,14 @@ export function EventCard({ event, compact = false }: EventCardProps) {
                 <div className="data-label mb-2">Related Tickers</div>
                 <div className="flex flex-wrap gap-1">
                   {event.extracted_tickers.map((ticker) => (
-                    <span key={ticker} className="ticker-chip text-xs">
+                    <Link
+                      key={ticker}
+                      href={`/dashboard/ticker/${ticker}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="ticker-chip text-xs hover:bg-accent hover:text-bg-primary transition-colors"
+                    >
                       {ticker}
-                    </span>
+                    </Link>
                   ))}
                 </div>
               </div>

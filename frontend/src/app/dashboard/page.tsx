@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { TrendingUp, TrendingDown, Clock, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -8,6 +8,15 @@ import { useEventStream } from '@/hooks/useEventStream';
 import { useEventStore } from '@/store/eventStore';
 import { EventCard } from '@/components/events/EventCard';
 import { formatRelativeTime, cn } from '@/lib/utils';
+
+function calculateChange(current: number, previous: number): { value: number; direction: 'up' | 'down' | 'neutral' } {
+  if (previous === 0) return { value: 0, direction: 'neutral' };
+  const change = ((current - previous) / previous) * 100;
+  return {
+    value: Math.abs(Math.round(change)),
+    direction: change > 0 ? 'up' : change < 0 ? 'down' : 'neutral',
+  };
+}
 
 export default function DashboardPage() {
   const { status: wsStatus } = useEventStream({ channel: 'all' });
@@ -21,6 +30,13 @@ export default function DashboardPage() {
     queryFn: () => api.getLatestEvents(50),
   });
 
+  // Fetch stats
+  const { data: statsData } = useQuery({
+    queryKey: ['stats'],
+    queryFn: () => api.getStats(),
+    refetchInterval: 60000, // Refresh every minute
+  });
+
   // Set initial events
   useEffect(() => {
     if (initialEvents) {
@@ -28,13 +44,32 @@ export default function DashboardPage() {
     }
   }, [initialEvents, setEvents]);
 
-  // Calculate stats
-  const stats = {
-    totalEvents: events.length,
-    bullishEvents: events.filter((e) => e.direction === 'BULLISH').length,
-    bearishEvents: events.filter((e) => e.direction === 'BEARISH').length,
-    highAlphaCount: highAlphaEvents.length,
-  };
+  // Calculate stats with real data
+  const stats = useMemo(() => {
+    if (statsData) {
+      return {
+        totalEvents: statsData.total_events,
+        totalChange: calculateChange(statsData.total_events, statsData.total_events_yesterday),
+        bullishEvents: statsData.bullish_events,
+        bullishChange: calculateChange(statsData.bullish_events, statsData.bullish_events_yesterday),
+        bearishEvents: statsData.bearish_events,
+        bearishChange: calculateChange(statsData.bearish_events, statsData.bearish_events_yesterday),
+        highAlphaCount: statsData.high_alpha_events,
+        highAlphaLastHour: statsData.high_alpha_events_last_hour,
+      };
+    }
+    // Fallback to local calculation
+    return {
+      totalEvents: events.length,
+      totalChange: { value: 0, direction: 'neutral' as const },
+      bullishEvents: events.filter((e) => e.direction === 'BULLISH').length,
+      bullishChange: { value: 0, direction: 'neutral' as const },
+      bearishEvents: events.filter((e) => e.direction === 'BEARISH').length,
+      bearishChange: { value: 0, direction: 'neutral' as const },
+      highAlphaCount: highAlphaEvents.length,
+      highAlphaLastHour: 0,
+    };
+  }, [statsData, events, highAlphaEvents]);
 
   return (
     <div className="space-y-6">
@@ -68,8 +103,19 @@ export default function DashboardPage() {
                 {stats.totalEvents}
               </p>
               <p className="text-xs text-text-tertiary mt-2 flex items-center gap-1">
-                <ArrowUpRight className="h-3 w-3 text-positive" />
-                <span className="text-positive font-medium">+12%</span>
+                {stats.totalChange.direction === 'up' ? (
+                  <>
+                    <ArrowUpRight className="h-3 w-3 text-positive" />
+                    <span className="text-positive font-medium">+{stats.totalChange.value}%</span>
+                  </>
+                ) : stats.totalChange.direction === 'down' ? (
+                  <>
+                    <ArrowDownRight className="h-3 w-3 text-negative" />
+                    <span className="text-negative font-medium">-{stats.totalChange.value}%</span>
+                  </>
+                ) : (
+                  <span className="text-text-tertiary font-medium">—</span>
+                )}
                 <span>vs yesterday</span>
               </p>
             </div>
@@ -87,8 +133,19 @@ export default function DashboardPage() {
                 {stats.bullishEvents}
               </p>
               <p className="text-xs text-text-tertiary mt-2 flex items-center gap-1">
-                <ArrowUpRight className="h-3 w-3 text-positive" />
-                <span className="text-positive font-medium">+8%</span>
+                {stats.bullishChange.direction === 'up' ? (
+                  <>
+                    <ArrowUpRight className="h-3 w-3 text-positive" />
+                    <span className="text-positive font-medium">+{stats.bullishChange.value}%</span>
+                  </>
+                ) : stats.bullishChange.direction === 'down' ? (
+                  <>
+                    <ArrowDownRight className="h-3 w-3 text-negative" />
+                    <span className="text-negative font-medium">-{stats.bullishChange.value}%</span>
+                  </>
+                ) : (
+                  <span className="text-text-tertiary font-medium">—</span>
+                )}
                 <span>vs yesterday</span>
               </p>
             </div>
@@ -106,8 +163,19 @@ export default function DashboardPage() {
                 {stats.bearishEvents}
               </p>
               <p className="text-xs text-text-tertiary mt-2 flex items-center gap-1">
-                <ArrowDownRight className="h-3 w-3 text-negative" />
-                <span className="text-negative font-medium">-5%</span>
+                {stats.bearishChange.direction === 'up' ? (
+                  <>
+                    <ArrowUpRight className="h-3 w-3 text-negative" />
+                    <span className="text-negative font-medium">+{stats.bearishChange.value}%</span>
+                  </>
+                ) : stats.bearishChange.direction === 'down' ? (
+                  <>
+                    <ArrowDownRight className="h-3 w-3 text-positive" />
+                    <span className="text-positive font-medium">-{stats.bearishChange.value}%</span>
+                  </>
+                ) : (
+                  <span className="text-text-tertiary font-medium">—</span>
+                )}
                 <span>vs yesterday</span>
               </p>
             </div>
@@ -125,7 +193,7 @@ export default function DashboardPage() {
                 {stats.highAlphaCount}
               </p>
               <p className="text-xs text-text-tertiary mt-2 flex items-center gap-1">
-                <span className="text-accent font-medium">3 new</span>
+                <span className="text-accent font-medium">{stats.highAlphaLastHour} new</span>
                 <span>this hour</span>
               </p>
             </div>

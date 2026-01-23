@@ -97,14 +97,14 @@ export function formatNumber(num: number): string {
   return num.toString();
 }
 
-export function debounce<T extends (...args: unknown[]) => unknown>(
+export function debounce<T extends (...args: string[]) => void>(
   func: T,
   wait: number
-): (...args: Parameters<T>) => void {
+): T {
   let timeout: NodeJS.Timeout | null = null;
 
-  return (...args: Parameters<T>) => {
+  return ((...args: Parameters<T>) => {
     if (timeout) clearTimeout(timeout);
     timeout = setTimeout(() => func(...args), wait);
-  };
+  }) as T;
 }
