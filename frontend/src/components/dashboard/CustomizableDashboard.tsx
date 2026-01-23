@@ -1,7 +1,10 @@
 'use client';
 
 import { useState, useCallback, useMemo } from 'react';
-import { Responsive, WidthProvider, Layout } from 'react-grid-layout';
+import { Responsive, WidthProvider } from 'react-grid-layout';
+import type { Layout } from 'react-grid-layout';
+
+const ResponsiveGridLayout = WidthProvider(Responsive);
 import { Settings, RotateCcw, Lock, Unlock, X, Eye, EyeOff } from 'lucide-react';
 import { useLayoutStore, DEFAULT_LAYOUTS, DEFAULT_WIDGETS, type WidgetType } from '@/store/layoutStore';
 import {
@@ -16,8 +19,6 @@ import { cn } from '@/lib/utils';
 // Import react-grid-layout styles
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-
-const ResponsiveGridLayout = WidthProvider(Responsive);
 
 // Widget component mapping
 const WIDGET_COMPONENTS: Record<WidgetType, React.ComponentType> = {

@@ -408,7 +408,7 @@ export default function EventFeedPage() {
               )}
               {!hasNextPage && sortedEvents.length > 0 && (
                 <p className="text-center text-sm text-text-tertiary py-4">
-                  You've reached the end of the feed
+                  You&apos;ve reached the end of the feed
                 </p>
               )}
             </div>

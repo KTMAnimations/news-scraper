@@ -3,8 +3,6 @@ import type { Event, EventFilters, EventsResponse } from '@/types/events';
 import type { User, WatchlistItem, Alert, AlertCreate } from '@/types/user';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-// Auth mock mode - allows any credentials for login
-const AUTH_MOCK_MODE = process.env.NEXT_PUBLIC_MOCK_MODE === 'true';
 
 // Retry configuration
 const RETRY_CONFIG = {
@@ -194,9 +192,6 @@ class ApiClient {
 
   // Auth endpoints
   async login(email: string, password: string) {
-    if (AUTH_MOCK_MODE) {
-      return { access_token: 'mock-token', token_type: 'bearer' };
-    }
     return this.request<{ access_token: string; token_type: string }>(
       '/api/v1/auth/login',
       {
@@ -207,14 +202,6 @@ class ApiClient {
   }
 
   async register(email: string, password: string, full_name?: string) {
-    if (AUTH_MOCK_MODE) {
-      return {
-        id: 'mock-user-' + Date.now(),
-        email,
-        full_name: full_name || email.split('@')[0],
-        subscription_tier: 'starter',
-      } as User;
-    }
     return this.request<User>('/api/v1/auth/register', {
       method: 'POST',
       body: JSON.stringify({ email, password, full_name }),
@@ -222,14 +209,6 @@ class ApiClient {
   }
 
   async getCurrentUser() {
-    if (AUTH_MOCK_MODE) {
-      return {
-        id: 'mock-user-123',
-        email: 'demo@micro-alpha.com',
-        full_name: 'Demo User',
-        subscription_tier: 'professional',
-      } as User;
-    }
     return this.request<User>('/api/v1/auth/me');
   }
 

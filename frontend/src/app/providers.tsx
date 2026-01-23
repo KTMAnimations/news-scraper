@@ -2,7 +2,6 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SessionProvider } from 'next-auth/react';
-import { ThemeProvider } from 'next-themes';
 import { useState } from 'react';
 import { Toaster } from 'sonner';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
@@ -84,17 +83,15 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <SessionProvider>
-      <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-        <QueryClientProvider client={queryClient}>
-          <WebSocketProvider enableBatching={true} batchInterval={100}>
-            <NotificationProvider>
-              {children}
-            </NotificationProvider>
-          </WebSocketProvider>
-          <Toaster position="top-right" richColors closeButton />
-          <InstallPrompt />
-        </QueryClientProvider>
-      </ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <WebSocketProvider enableBatching={true} batchInterval={100}>
+          <NotificationProvider>
+            {children}
+          </NotificationProvider>
+        </WebSocketProvider>
+        <Toaster position="top-right" richColors closeButton />
+        <InstallPrompt />
+      </QueryClientProvider>
     </SessionProvider>
   );
 }
