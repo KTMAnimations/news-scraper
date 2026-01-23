@@ -97,7 +97,7 @@ export default function AuthLayout({
           {/* Testimonial */}
           <div className="pt-8 border-t border-bg-primary/10">
             <blockquote className="text-bg-primary/80 text-lg mb-4 leading-relaxed">
-              "The only platform that consistently surfaces alpha before Bloomberg terminals."
+              &ldquo;The only platform that consistently surfaces alpha before Bloomberg terminals.&rdquo;
             </blockquote>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center">

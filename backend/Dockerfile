@@ -5,7 +5,8 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/app
 
 # Set work directory
 WORKDIR /app
@@ -18,21 +19,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Create backend directory structure
+RUN mkdir -p /app/backend
+
 # Install Python dependencies
-COPY pyproject.toml ./
+COPY pyproject.toml ./backend/
 RUN pip install --upgrade pip && \
-    pip install .
+    cd backend && pip install .
 
 # Download spaCy model
 RUN python -m spacy download en_core_web_sm
 
 # Copy application code
-COPY . .
+COPY . ./backend/
 
 # Create non-root user
 RUN adduser --disabled-password --gecos '' appuser && \
     chown -R appuser:appuser /app
 USER appuser
+
+# Set working directory to backend
+WORKDIR /app
 
 # Expose port
 EXPOSE 8000

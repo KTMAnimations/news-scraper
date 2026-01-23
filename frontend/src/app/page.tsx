@@ -312,8 +312,8 @@ export default function HomePage() {
             <div className="relative grid md:grid-cols-2 gap-12 items-center">
               <div>
                 <blockquote className="text-xl md:text-2xl font-medium text-text-primary leading-relaxed mb-6">
-                  "Finally, a sentiment feed that understands micro-cap dynamics.
-                  The Form 4 alerts alone have paid for our subscription."
+                  &ldquo;Finally, a sentiment feed that understands micro-cap dynamics.
+                  The Form 4 alerts alone have paid for our subscription.&rdquo;
                 </blockquote>
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 rounded-full bg-accent-subtle flex items-center justify-center">

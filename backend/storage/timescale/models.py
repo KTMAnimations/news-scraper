@@ -63,8 +63,8 @@ class Event(Base):
     extracted_people = Column(ARRAY(String))
     extracted_amounts = Column(JSON)
 
-    # Metadata
-    metadata = Column(JSON, default=dict)
+    # Extra data
+    event_metadata = Column(JSON, default=dict)
 
     # Indexes for common queries
     __table_args__ = (
