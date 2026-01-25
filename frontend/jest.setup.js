@@ -25,16 +25,6 @@ jest.mock('next-auth/react', () => ({
   ),
 }));
 
-// Mock next-themes
-jest.mock('next-themes', () => ({
-  useTheme: jest.fn(() => ({
-    theme: 'dark',
-    setTheme: jest.fn(),
-    resolvedTheme: 'dark',
-  })),
-  ThemeProvider: ({ children }) => children,
-}));
-
 // Mock next/navigation
 jest.mock('next/navigation', () => ({
   useRouter: jest.fn(() => ({

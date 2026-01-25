@@ -292,7 +292,7 @@ export default function TickerDetailPage() {
                 <ExternalLink className="h-3 w-3" />
               </a>
             </div>
-            <TradingViewChart symbol={ticker} theme="dark" height={500} interval="D" />
+            <TradingViewChart symbol={ticker} height={500} interval="D" />
           </div>
 
           {/* Chart & Sentiment Overview */}

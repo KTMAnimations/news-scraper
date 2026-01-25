@@ -4,14 +4,12 @@ import { useEffect, useRef, memo } from 'react';
 
 interface TradingViewChartProps {
   symbol: string;
-  theme?: 'light' | 'dark';
   height?: number;
   interval?: string;
 }
 
 function TradingViewChartComponent({
   symbol,
-  theme = 'dark',
   height = 400,
   interval = 'D',
 }: TradingViewChartProps) {
@@ -48,7 +46,7 @@ function TradingViewChartComponent({
       symbol: symbol,
       interval: interval,
       timezone: 'Etc/UTC',
-      theme: theme,
+      theme: 'light',
       style: '1',
       locale: 'en',
       enable_publishing: false,
@@ -59,8 +57,8 @@ function TradingViewChartComponent({
       hide_legend: false,
       save_image: false,
       hide_volume: false,
-      backgroundColor: theme === 'dark' ? 'rgba(17, 17, 17, 1)' : 'rgba(255, 255, 255, 1)',
-      gridColor: theme === 'dark' ? 'rgba(40, 40, 40, 1)' : 'rgba(240, 240, 240, 1)',
+      backgroundColor: 'rgba(255, 255, 255, 1)',
+      gridColor: 'rgba(240, 240, 240, 1)',
       studies: ['STD;RSI'],
     });
 
@@ -72,7 +70,7 @@ function TradingViewChartComponent({
         containerRef.current.innerHTML = '';
       }
     };
-  }, [symbol, theme, interval]);
+  }, [symbol, interval]);
 
   return (
     <div

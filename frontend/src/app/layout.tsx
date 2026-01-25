@@ -132,10 +132,7 @@ export const metadata: Metadata = {
 
 // Viewport configuration (separated from metadata in Next.js 14+)
 export const viewport: Viewport = {
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
-    { media: '(prefers-color-scheme: dark)', color: '#0a0a0b' },
-  ],
+  themeColor: '#ffffff',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 5,
@@ -179,7 +176,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en">
       <head>
         {/* PWA meta tags */}
         <meta name="application-name" content={siteConfig.name} />
