@@ -94,3 +94,6 @@ secrets.json
 
 # Claude
 .claude/
+.claude-flow/
+.swarm/
+claude-flow
